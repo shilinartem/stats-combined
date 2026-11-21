@@ -13,7 +13,7 @@ import Cocoa
 
 public class BatteryWidget: WidgetWrapper {
     private let textCache = WidgetTextCache()
-    private var additional: String = "none"
+    private var additional: String = "percentage"
     private var timeFormat: String = "short"
     private var iconState: Bool = true
     private var colorState: Bool = false

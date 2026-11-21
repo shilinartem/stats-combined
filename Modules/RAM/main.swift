@@ -200,6 +200,11 @@ public class RAM: Module {
                 ])
             case let widget as TextWidget:
                 var text = "\(self.textValue)"
+                if text == "$mem.free" {
+                    let reading = CompactMenuBar.memory(freeBytes: Int64(value.free))
+                    widget.setValue(reading.text, tone: reading.tone)
+                    break
+                }
                 let pairs = TextWidget.parseText(text)
                 pairs.forEach { pair in
                     var replacement: String? = nil

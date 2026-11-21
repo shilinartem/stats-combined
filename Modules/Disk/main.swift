@@ -320,6 +320,11 @@ public class Disk: Module {
                 ])
             case let widget as TextWidget:
                 var text = "\(self.textValue)"
+                if text == "$capacity.free" {
+                    let reading = CompactMenuBar.disk(freeBytes: d.free)
+                    widget.setValue(reading.text, tone: reading.tone)
+                    break
+                }
                 let pairs = TextWidget.parseText(text)
                 pairs.forEach { pair in
                     var replacement: String? = nil

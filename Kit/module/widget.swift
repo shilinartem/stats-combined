@@ -413,6 +413,11 @@ public class MenuBar {
         get { self.queue.sync { self._active } }
         set { self.queue.sync { self._active = newValue } }
     }
+
+    private var _presentationVisible = true
+    public var presentationVisible: Bool {
+        self.queue.sync { self._presentationVisible }
+    }
     
     init(moduleName: String) {
         self.moduleName = moduleName
@@ -437,6 +442,7 @@ public class MenuBar {
     
     public func append(_ widget: SWidget) {
         widget.toggleCallback = { [weak self] (type, state) in
+            if state && self?.presentationVisible != true { return }
             if let s = self, s.oneView {
                 if state, let w = s.activeWidgets.first(where: { $0.type == type }) {
                     DispatchQueue.main.async(execute: {
@@ -466,12 +472,8 @@ public class MenuBar {
     }
     
     public func enable() {
-        if self.oneView && !self.combinedModules {
-            self.setupMenuBarItem(true)
-        }
         self.active = true
-        self.widgets.forEach{ $0.enable() }
-        self.callback?()
+        self.applyPresentation()
     }
     
     public func disable() {
@@ -482,10 +484,36 @@ public class MenuBar {
         }
         self.callback?()
     }
+
+    public func setPresentationVisible(_ visible: Bool) {
+        let changed = self.queue.sync { () -> Bool in
+            guard self._presentationVisible != visible else { return false }
+            self._presentationVisible = visible
+            return true
+        }
+        guard changed else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.active else { return }
+            self.applyPresentation()
+        }
+    }
+
+    private func applyPresentation() {
+        let visible = self.presentationVisible
+        if self.oneView && !self.combinedModules {
+            self.setupMenuBarItem(visible)
+        }
+        if visible {
+            self.activeWidgets.forEach { $0.enable() }
+        } else {
+            self.widgets.forEach { $0.disable() }
+        }
+        self.callback?()
+    }
     
     private func setupMenuBarItem(_ state: Bool) {
         DispatchQueue.main.async(execute: {
-            if state && self.active {
+            if state && self.active && self.presentationVisible {
                 guard self.menuBarItem == nil else { return }
                 restoreNSStatusItemPosition(id: self.moduleName)
                 self.menuBarItem = NSStatusBar.system.statusItem(withLength: 0)
@@ -511,7 +539,7 @@ public class MenuBar {
     }
     
     private func recalculateWidth() {
-        guard self.oneView, self.active else { return }
+        guard self.oneView, self.active, self.presentationVisible else { return }
         
         let w = self.activeWidgets.isEmpty ? 0 : self.activeWidgets.map({ $0.item.frame.width }).reduce(0, +) +
             (CGFloat(self.activeWidgets.count - 1) * Constants.Widget.spacing) +
@@ -552,10 +580,10 @@ public class MenuBar {
             self.setupMenuBarItem(false)
         } else {
             self.oneView = Store.shared.bool(key: "\(self.moduleName)_oneView", defaultValue: false)
-            self.setupMenuBarItem(self.oneView && self.active)
+            self.setupMenuBarItem(self.oneView && self.active && self.presentationVisible)
         }
         
-        guard self.active else { return }
+        guard self.active, self.presentationVisible else { return }
 
         self.activeWidgets.forEach { (w: SWidget) in
             w.enable()

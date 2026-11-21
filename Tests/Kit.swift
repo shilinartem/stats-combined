@@ -9,10 +9,81 @@
 //  Copyright © 2026 Serhiy Mytrovtsiy. All rights reserved.
 //
 
+import Cocoa
 import XCTest
 import Kit
 
 class KitTests: XCTestCase {
+    private let gibibyte: Int64 = 1 << 30
+
+    func testCompactMenuBarUsesFixedWidthWholeGigabytes() {
+        XCTAssertEqual(CompactMenuBar.disk(freeBytes: 43_999_999_999).text, "043")
+        XCTAssertEqual(CompactMenuBar.disk(freeBytes: 100_000_000_000).text, "100")
+        XCTAssertEqual(CompactMenuBar.disk(freeBytes: 1_000_000_000_000).text, "999")
+        XCTAssertEqual(CompactMenuBar.memory(freeBytes: 5 * gibibyte - 1).text, "04")
+        XCTAssertEqual(CompactMenuBar.memory(freeBytes: 0).text, "00")
+        XCTAssertEqual(CompactMenuBar.memory(freeBytes: 100 * gibibyte).text, "99")
+    }
+
+    @MainActor
+    func testCompactMenuBarTextKeepsItsWidthAcrossDigitAndColorChanges() {
+        let canvas = NSImage(size: NSSize(width: 100, height: 28))
+        canvas.lockFocus()
+        defer { canvas.unlockFocus() }
+
+        for (normal, critical) in [("111", "008"), ("11", "00")] {
+            let view = TextWidget(title: "Metrics")
+            view.setValue(normal, tone: .normal)
+            view.draw(view.bounds)
+            let normalWidth = view.shadowSize.width
+            view.setValue(critical, tone: .red)
+            view.draw(view.bounds)
+            XCTAssertEqual(view.shadowSize.width, normalWidth)
+        }
+    }
+
+    func testCompactMenuBarDiskColorsUseStrictByteThresholds() {
+        XCTAssertEqual(CompactMenuBar.disk(freeBytes: 40_000_000_000).tone, .normal)
+        XCTAssertEqual(CompactMenuBar.disk(freeBytes: 39_999_999_999).tone, .yellow)
+        XCTAssertEqual(CompactMenuBar.disk(freeBytes: 15_000_000_000).tone, .yellow)
+        XCTAssertEqual(CompactMenuBar.disk(freeBytes: 14_999_999_999).tone, .red)
+    }
+
+    func testCompactMenuBarRAMColorsUseInclusiveByteThresholds() {
+        XCTAssertEqual(CompactMenuBar.memory(freeBytes: 2 * gibibyte + 1).tone, .normal)
+        XCTAssertEqual(CompactMenuBar.memory(freeBytes: 2 * gibibyte).tone, .orange)
+        XCTAssertEqual(CompactMenuBar.memory(freeBytes: gibibyte + 1).tone, .orange)
+        XCTAssertEqual(CompactMenuBar.memory(freeBytes: gibibyte).tone, .red)
+    }
+
+    func testCompactMenuBarBatteryOnlyShowsWhenUnpluggedBelowHalf() {
+        XCTAssertTrue(CompactMenuBar.showsBattery(level: 0.49, onBatteryPower: true, isCharging: false))
+        XCTAssertTrue(CompactMenuBar.showsBattery(level: 0, onBatteryPower: true, isCharging: false))
+        XCTAssertFalse(CompactMenuBar.showsBattery(level: 0.50, onBatteryPower: true, isCharging: false))
+        XCTAssertFalse(CompactMenuBar.showsBattery(level: 0.49, onBatteryPower: false, isCharging: false))
+        XCTAssertFalse(CompactMenuBar.showsBattery(level: 0.49, onBatteryPower: true, isCharging: true))
+    }
+
+    func testCompactMenuBarAlertColorsContrastWithLightAndDarkBackgrounds() throws {
+        let tones: [CompactMenuBar.Tone] = [.yellow, .orange, .red]
+        for tone in tones {
+            for (dark, background) in [(false, 0.95), (true, 0.1)] {
+                let foreground = try XCTUnwrap(tone.color(dark: dark).usingColorSpace(.sRGB))
+                let foregroundLuminance = 0.2126 * linear(foreground.redComponent)
+                    + 0.7152 * linear(foreground.greenComponent)
+                    + 0.0722 * linear(foreground.blueComponent)
+                let backgroundLuminance = linear(background)
+                let contrast = (max(foregroundLuminance, backgroundLuminance) + 0.05)
+                    / (min(foregroundLuminance, backgroundLuminance) + 0.05)
+                XCTAssertGreaterThanOrEqual(contrast, 4.5, "\(tone), dark: \(dark)")
+            }
+        }
+    }
+
+    private func linear(_ component: CGFloat) -> CGFloat {
+        component <= 0.04045 ? component / 12.92 : pow((component + 0.055) / 1.055, 2.4)
+    }
+
     func testIsNewestVersion_release() throws {
         XCTAssertFalse(isNewestVersion(currentVersion: "v2.11.0", latestVersion: "v2.11.0"))
         XCTAssertTrue(isNewestVersion(currentVersion: "v2.11.0", latestVersion: "v2.11.1"))

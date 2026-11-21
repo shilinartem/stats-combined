@@ -99,6 +99,7 @@ public class Battery: Module {
             notifications: self.notificationsView
         )
         guard self.available else { return }
+        self.menuBar.setPresentationVisible(false)
         
         self.usageReader = UsageReader(.battery) { [weak self] value in
             self?.usageCallback(value)
@@ -137,6 +138,13 @@ public class Battery: Module {
     
     private func usageCallback(_ raw: Battery_Usage?) {
         guard let value = raw, self.enabled else { return }
+
+        // Reader initialization can replay the previous session's battery state.
+        if self.usageReader != nil {
+            self.menuBar.setPresentationVisible(value.available == true && CompactMenuBar.showsBattery(
+                level: value.level, onBatteryPower: value.isBatteryPowered, isCharging: value.isCharging
+            ))
+        }
         
         self.popupView.usageCallback(value)
         self.portalView.loadCallback(value)

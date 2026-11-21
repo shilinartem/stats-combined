@@ -62,6 +62,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     
     static func main() {
         let launchStart = Date()
+        if !Store.shared.exist(key: "setupProcess") {
+            Store.shared.set(key: "CPU_state", value: false)
+            Store.shared.set(key: "Network_state", value: false)
+            Store.shared.set(key: "Disk_widget", value: "text")
+            Store.shared.set(key: "Disk_textWidgetValue", value: "$capacity.free")
+            Store.shared.set(key: "Disk_updateInterval", value: 300)
+            Store.shared.set(key: "RAM_widget", value: "text")
+            Store.shared.set(key: "RAM_textWidgetValue", value: "$mem.free")
+            Store.shared.set(key: "RAM_updateInterval", value: 30)
+            Store.shared.set(key: "Battery_state", value: true)
+            Store.shared.set(key: "update-interval", value: AppUpdateInterval.never.rawValue)
+            Store.shared.set(key: "setupProcess", value: true)
+        }
         let app = NSApplication.shared
         let delegate = AppDelegate()
         delegate.launchStart = launchStart
@@ -75,7 +88,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         self.suppressStatusBarTilingConstraintUpdates()
         self.parseArguments()
         self.parseVersion()
-        SMCHelper.shared.checkForUpdate()
+        if Bundle.main.bundleIdentifier == "eu.exelban.Stats" {
+            SMCHelper.shared.checkForUpdate()
+        }
         self.setup {
             modules.reversed().forEach{ $0.mount() }
             self.modulesMounted = true

@@ -102,8 +102,9 @@ public class DB {
     
     init() {
         let fileManager = FileManager.default
-        let supportPath = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("Stats")
-        let tmpPath = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("Stats")
+        let storageName = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "Stats"
+        let supportPath = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent(storageName)
+        let tmpPath = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(storageName)
         
         for path in [supportPath, tmpPath] {
             try? fileManager.createDirectory(at: path, withIntermediateDirectories: true, attributes: nil)
