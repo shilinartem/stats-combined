@@ -26,8 +26,9 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
     private static let inputSourceChanged = Notification.Name(kTISNotifySelectedKeyboardInputSourceChanged as String)
     
     private var status: Bool {
-        Store.shared.bool(key: "CombinedModules", defaultValue: false) && !Store.shared.bool(key: "pause", defaultValue: false)
+        CombinedModulesWidget.active != nil && !Store.shared.bool(key: "pause", defaultValue: false)
     }
+    private var display: CombinedModulesWidget { CombinedModulesWidget.active ?? .widgets }
     private var spacing: CGFloat {
         CGFloat(Int(Store.shared.string(key: "CombinedModules_spacing", defaultValue: "")) ?? 0)
     }
@@ -36,10 +37,10 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
     }
     
     private var activeModules: [Module] {
-        let style = CombinedModulesWidget.current
-        let auxiliary = CombinedModulesWidget.keyboardAndBattery
+        let style = self.display
+        let showsBattery = StatusWidgetPreferences.showsBattery
         return modules.filter {
-            $0.enabled && $0.menuBar.presentationVisible && style.includes(module: $0.moduleType, keyboardAndBattery: auxiliary)
+            $0.enabled && $0.menuBar.presentationVisible && style.includes(module: $0.moduleType, showsBattery: showsBattery)
         }.sorted(by: { $0.combinedPosition < $1.combinedPosition })
     }
     
@@ -71,10 +72,10 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
                 guard let self else { return }
                 self.summary.setValue(for: module, with: value)
                 guard self.status else { return }
-                let style = CombinedModulesWidget.current
+                let style = self.display
                 if style.isSummaryWidget {
                     self.updateSummary()
-                } else if style.isDiskRAMStack && style.includes(module: module, keyboardAndBattery: CombinedModulesWidget.keyboardAndBattery) {
+                } else if style.isDiskRAMStack && style.includes(module: module, showsBattery: StatusWidgetPreferences.showsBattery) {
                     self.updateStackedReadings()
                 }
             }
@@ -141,17 +142,17 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
         self.menuBarItem?.button?.toolTip = localizedString("Combined modules")
         self.menuBarItem?.button?.setAccessibilityLabel(localizedString("Combined modules"))
 
-        if CombinedModulesWidget.current.isDiskRAMStack {
+        if self.display.isDiskRAMStack {
             self.updateStackedReadings()
             return
         }
         
-        if CombinedModulesWidget.current.isSummaryWidget {
+        if self.display.isSummaryWidget {
             self.updateSummary()
             return
         }
         
-        if CombinedModulesWidget.current == .icon {
+        if self.display == .icon {
             self.view.addSubview(AppIcon())
             self.view.setFrameSize(NSSize(width: AppIcon.size.width, height: self.view.frame.height))
             self.menuBarItem?.length = AppIcon.size.width
@@ -178,55 +179,58 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
 
     @objc private func keyboardInputChanged() {
         DispatchQueue.main.async { [weak self] in
-            guard CombinedModulesWidget.keyboardAndBattery else { return }
+            guard StatusWidgetPreferences.showsKeyboard else { return }
             self?.updateStackedReadings()
         }
     }
 
     private func updateStackedReadings() {
         guard self.status, let item = self.menuBarItem else { return }
-        let style = CombinedModulesWidget.current
+        let style = self.display
         guard style.isDiskRAMStack else { return }
         let disk = modules.lazy.compactMap { ($0 as? Disk)?.displayedFreeBytes }.first
         let memory = modules.lazy.compactMap { ($0 as? RAM)?.displayedFreeBytes }.first
-        guard let values = style.stackedReadings(diskFreeBytes: disk, memoryFreeBytes: memory) else { return }
+        let showsUnits = StatusWidgetPreferences.showsUnits
+        guard let values = style.stackedReadings(
+            diskFreeBytes: disk, memoryFreeBytes: memory, showsUnits: showsUnits,
+            diskThresholds: StatusWidgetPreferences.thresholds(for: .disk),
+            memoryThresholds: StatusWidgetPreferences.thresholds(for: .memory)
+        ) else { return }
 
-        var auxiliary: (keyboard: CompactMenuBar.KeyboardLanguage?, battery: String?)?
-        if CombinedModulesWidget.keyboardAndBattery {
-            let battery = modules.lazy.compactMap { ($0 as? Battery)?.visibleBatteryPercentage }.first
-            auxiliary = (self.keyboardLanguage(), battery)
+        let keyboard = StatusWidgetPreferences.showsKeyboard ? self.keyboardCode() ?? "–" : nil
+        var battery: CompactMenuBar.Reading?
+        if StatusWidgetPreferences.showsBattery {
+            let percentage = modules.lazy.compactMap { ($0 as? Battery)?.chargeLevel }.first.map { ($0 * 100).rounded() }
+            battery = StatusWidgetMetric.battery.reading(percentage, thresholds: StatusWidgetPreferences.thresholds(for: .battery), suffix: "%")
         }
         if self.stacked.superview == nil {
             self.view.addSubview(self.stacked)
         }
-        self.stacked.update([values.disk, values.memory], alignLabels: style == .diskRAMLabels, auxiliary: auxiliary)
+        self.stacked.update([values.disk, values.memory], style: style, showsUnits: showsUnits, keyboard: keyboard, battery: battery)
         self.view.setFrameSize(self.stacked.frame.size)
         if item.length != self.stacked.frame.width {
             item.length = self.stacked.frame.width
         }
 
         var description = "\(localizedString("Disk")): \(values.disk.text), \(localizedString("RAM")): \(values.memory.text)"
-        if let auxiliary {
-            let language = auxiliary.keyboard.map { $0 == .russian ? "RU" : "EN" } ?? "RU | EN"
-            description += ", \(localizedString("Keyboard")): \(language)"
-            if let battery = auxiliary.battery { description += ", \(localizedString("Battery")): \(battery)" }
-        }
+        if let keyboard { description += ", \(localizedString("Keyboard")): \(keyboard)" }
+        if let battery { description += ", \(localizedString("Battery")): \(battery.text)" }
         item.button?.toolTip = description
         item.button?.setAccessibilityLabel(description)
     }
 
-    private func keyboardLanguage() -> CompactMenuBar.KeyboardLanguage? {
+    private func keyboardCode() -> String? {
         guard let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue() else { return nil }
         if let property = TISGetInputSourceProperty(source, kTISPropertyLocalizedName) {
             let name = (Unmanaged<CFString>.fromOpaque(property).takeUnretainedValue() as String).lowercased()
-            if name.contains("russian") || name.contains("рус") { return .russian }
+            if name.contains("russian") || name.contains("рус") { return "RU" }
         }
         guard let property = TISGetInputSourceProperty(source, kTISPropertyInputSourceLanguages),
               let languages = Unmanaged<CFArray>.fromOpaque(property).takeUnretainedValue() as? [String],
               let language = languages.first else { return nil }
-        return CompactMenuBar.KeyboardLanguage(languageTag: language)
+        return CompactMenuBar.keyboardCode(languageTag: language)
     }
-    
+
     private func updateSummary() {
         guard self.menuBarItem != nil else { return }
         let list = self.activeModules.filter({ $0.config.hasSummary })
@@ -258,7 +262,7 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
     private func visibilityCallback(_ state: Bool) {}
     
     @objc private func handleClick() {
-        if CombinedModulesWidget.current != .widgets || self.combinedModulesPopup {
+        if self.display != .widgets || self.combinedModulesPopup {
             self.togglePopup()
         } else {
             self.openModulePopup()
@@ -267,7 +271,7 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
     
     private func handleAlternateClick(_ event: NSEvent) -> NSEvent? {
         guard let window = self.menuBarItem?.button?.window, event.window == window,
-              CombinedModulesWidget.current == .widgets, self.combinedModulesAlternateDetails else { return event }
+              self.display == .widgets, self.combinedModulesAlternateDetails else { return event }
         
         let flags = CGEventSource.flagsState(.combinedSessionState)
         guard flags.isDisjoint(with: [.maskControl, .maskCommand]) else { return event }
@@ -354,24 +358,28 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
 
 internal class StackedMenuBarView: NSView {
     private let font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
-    private let activeFont = NSFont.monospacedSystemFont(ofSize: 10, weight: .bold)
     private let inset: CGFloat = 3
     private let gap: CGFloat = 8
     private var readings: [CompactMenuBar.Reading] = []
     private var alignLabels = false
-    private var auxiliary: (keyboard: CompactMenuBar.KeyboardLanguage?, battery: String?)?
+    private var keyboard: String?
+    private var battery: CompactMenuBar.Reading?
     private var readingsWidth: CGFloat = 0
-    private var keyboardWidth: CGFloat = 0
+    private var auxiliaryWidth: CGFloat = 0
 
     override var isFlipped: Bool { true }
 
-    func update(_ readings: [CompactMenuBar.Reading], alignLabels: Bool, auxiliary: (keyboard: CompactMenuBar.KeyboardLanguage?, battery: String?)?) {
+    func update(_ readings: [CompactMenuBar.Reading], style: CombinedModulesWidget, showsUnits: Bool, keyboard: String?, battery: CompactMenuBar.Reading?) {
         self.readings = readings
-        self.alignLabels = alignLabels
-        self.auxiliary = auxiliary
-        self.readingsWidth = ceil(readings.map { self.text($0.text).size().width }.max() ?? 0)
-        self.keyboardWidth = auxiliary == nil ? 0 : ceil(self.text("RU | EN", font: self.activeFont).size().width)
-        let auxiliarySpace = auxiliary == nil ? 0 : self.gap + self.keyboardWidth
+        self.alignLabels = style == .diskRAMLabels
+        self.keyboard = keyboard
+        self.battery = battery
+        let templateLength = 3 + (self.alignLabels ? 4 : 0) + (showsUnits ? 3 : 0)
+        let minWidth = self.text(String(repeating: "0", count: templateLength)).size().width
+        self.readingsWidth = ceil(max(minWidth, readings.map { self.text($0.text).size().width }.max() ?? 0))
+        let auxiliaryLength = max(keyboard == nil ? 0 : 3, battery == nil ? 0 : 4)
+        self.auxiliaryWidth = ceil(self.text(String(repeating: "0", count: auxiliaryLength)).size().width)
+        let auxiliarySpace = auxiliaryLength > 0 ? self.gap + self.auxiliaryWidth : 0
         self.setFrameSize(NSSize(width: self.readingsWidth + auxiliarySpace + 2 * self.inset, height: Constants.Widget.height))
         self.needsDisplay = true
     }
@@ -383,16 +391,13 @@ internal class StackedMenuBarView: NSView {
             let rect = NSRect(x: self.inset, y: CGFloat(row) * height, width: self.readingsWidth, height: height)
             self.draw(self.text(reading.text, color: reading.tone.color(dark: self.isDarkMode)), in: rect, alignment: self.alignLabels ? .left : .right)
         }
-        guard let auxiliary = self.auxiliary else { return }
         let x = self.inset + self.readingsWidth + self.gap
-        let keyboard = NSMutableAttributedString(attributedString: self.text("RU | EN", color: .secondaryLabelColor))
-        if let language = auxiliary.keyboard {
-            let range = NSRange(location: language == .russian ? 0 : 5, length: 2)
-            keyboard.addAttributes([.font: self.activeFont, .foregroundColor: NSColor.labelColor], range: range)
+        if let keyboard = self.keyboard {
+            self.draw(self.text(keyboard), in: NSRect(x: x, y: 0, width: self.auxiliaryWidth, height: height), alignment: .center)
         }
-        self.draw(keyboard, in: NSRect(x: x, y: 0, width: self.keyboardWidth, height: height), alignment: .center)
-        if let battery = auxiliary.battery {
-            self.draw(self.text(battery), in: NSRect(x: x, y: height, width: self.keyboardWidth, height: height), alignment: .center)
+        if let battery = self.battery {
+            let text = self.text(battery.text, color: battery.tone.color(dark: self.isDarkMode))
+            self.draw(text, in: NSRect(x: x, y: height, width: self.auxiliaryWidth, height: height), alignment: .center)
         }
     }
 
@@ -401,8 +406,8 @@ internal class StackedMenuBarView: NSView {
         self.needsDisplay = true
     }
 
-    private func text(_ value: String, font: NSFont? = nil, color: NSColor = .textColor) -> NSAttributedString {
-        NSAttributedString(string: value, attributes: [.font: font ?? self.font, .foregroundColor: color])
+    private func text(_ value: String, color: NSColor = .textColor) -> NSAttributedString {
+        NSAttributedString(string: value, attributes: [.font: self.font, .foregroundColor: color])
     }
 
     private func draw(_ text: NSAttributedString, in rect: NSRect, alignment: NSTextAlignment) {

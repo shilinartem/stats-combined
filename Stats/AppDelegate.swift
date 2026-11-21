@@ -77,6 +77,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             Store.shared.set(key: "update-interval", value: AppUpdateInterval.never.rawValue)
             Store.shared.set(key: "setupProcess", value: true)
         }
+        StatusWidgetPreferences.migrateCombinedLayout()
         let app = NSApplication.shared
         let delegate = AppDelegate()
         delegate.launchStart = launchStart
@@ -186,7 +187,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     
     private func showSettingsIfNoActiveWidgets() {
         if self.pauseState { return }
-        if Store.shared.bool(key: "CombinedModules", defaultValue: false), CombinedModulesWidget.current != .widgets { return }
+        if let display = CombinedModulesWidget.active, display != .widgets { return }
         let hasActive = modules.contains(where: { $0.enabled != false && $0.available != false && !$0.menuBar.widgets.filter({ $0.isActive }).isEmpty })
         if hasActive { return }
         self.ensureSettingsWindow().setIsVisible(true)

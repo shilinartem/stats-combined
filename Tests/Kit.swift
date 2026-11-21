@@ -42,9 +42,9 @@ class KitTests: XCTestCase {
 
     func testStackedMenuBarHasThreeDiskAboveRAMFormats() throws {
         let variants: [(CombinedModulesWidget, String, String)] = [
-            (.diskRAMNumbers, "043", "04"),
-            (.diskRAMUnits, "043 GB", "04 GB"),
-            (.diskRAMLabels, "SSD 043 GB", "RAM 04 GB")
+            (.diskRAMNumbers, "43", "4"),
+            (.diskRAMUnits, "43 GB", "4 GB"),
+            (.diskRAMLabels, "SSD 43 GB", "RAM 4 GB")
         ]
         for (style, disk, memory) in variants {
             let rows = try XCTUnwrap(style.stackedReadings(diskFreeBytes: 43_500_000_000, memoryFreeBytes: 4 * gibibyte))
@@ -53,33 +53,58 @@ class KitTests: XCTestCase {
         }
     }
 
-    func testStackedMenuBarRetainsAlertColorsAndMissingReadingWidths() throws {
+    func testStackedMenuBarRetainsAlertColorsAndShowsWhenReadingsAreMissing() throws {
         let rows = try XCTUnwrap(CombinedModulesWidget.diskRAMLabels.stackedReadings(diskFreeBytes: 14_000_000_000, memoryFreeBytes: gibibyte))
         XCTAssertEqual(rows.disk.tone, .red)
         XCTAssertEqual(rows.memory.tone, .red)
         let missing = try XCTUnwrap(CombinedModulesWidget.diskRAMLabels.stackedReadings(diskFreeBytes: nil, memoryFreeBytes: nil))
-        XCTAssertEqual(missing.disk.text.count, rows.disk.text.count)
-        XCTAssertEqual(missing.memory.text.count, rows.memory.text.count)
+        XCTAssertEqual(missing.disk.text, "SSD – GB")
+        XCTAssertEqual(missing.memory.text, "RAM – GB")
+    }
+
+    func testStatusWidgetCanHideUnitsWhileKeepingLabelsAndLargeValues() throws {
+        let rows = try XCTUnwrap(CombinedModulesWidget.diskRAMLabels.stackedReadings(
+            diskFreeBytes: 1_207_000_000_000, memoryFreeBytes: 4 * gibibyte, showsUnits: false
+        ))
+        XCTAssertEqual(rows.disk.text, "SSD 1207")
+        XCTAssertEqual(rows.memory.text, "RAM 4")
+    }
+
+    func testStatusWidgetAlwaysFormatsBatteryAndUsesConfiguredThresholds() {
+        let battery = StatusWidgetMetric.battery
+        let thresholds = StatusWidgetThresholds(warning: 25, critical: 10)
+        XCTAssertEqual(battery.reading(100, thresholds: thresholds, suffix: "%").text, "100%")
+        XCTAssertEqual(battery.reading(26, thresholds: thresholds, suffix: "%").tone, .normal)
+        XCTAssertEqual(battery.reading(25, thresholds: thresholds, suffix: "%").tone, .yellow)
+        XCTAssertEqual(battery.reading(10, thresholds: thresholds, suffix: "%").tone, .red)
+        XCTAssertEqual(StatusWidgetThresholds(warning: 5, critical: 10).critical, 5)
+
+        let custom = StatusWidgetThresholds(warning: 10, critical: 5)
+        XCTAssertEqual(StatusWidgetMetric.disk.reading(5, thresholds: custom).tone, .yellow)
+        XCTAssertEqual(StatusWidgetMetric.memory.reading(5, thresholds: custom).tone, .red)
     }
 
     func testStackedMenuBarMovesBatteryIntoTheOptionalColumnOnly() {
         let style = CombinedModulesWidget.diskRAMUnits
-        XCTAssertTrue(style.includes(module: .disk, keyboardAndBattery: false))
-        XCTAssertTrue(style.includes(module: .RAM, keyboardAndBattery: false))
-        XCTAssertFalse(style.includes(module: .battery, keyboardAndBattery: false))
-        XCTAssertTrue(style.includes(module: .battery, keyboardAndBattery: true))
-        XCTAssertFalse(style.includes(module: .CPU, keyboardAndBattery: true))
-        XCTAssertTrue(CombinedModulesWidget.widgets.includes(module: .CPU, keyboardAndBattery: false))
+        XCTAssertTrue(style.includes(module: .disk, showsBattery: false))
+        XCTAssertTrue(style.includes(module: .RAM, showsBattery: false))
+        XCTAssertFalse(style.includes(module: .battery, showsBattery: false))
+        XCTAssertTrue(style.includes(module: .battery, showsBattery: true))
+        XCTAssertFalse(style.includes(module: .CPU, showsBattery: true))
+        XCTAssertTrue(CombinedModulesWidget.widgets.includes(module: .CPU, showsBattery: false))
     }
 
     @MainActor
-    func testStackedMenuBarKeepsItsWidthWhenKeyboardOrBatteryChanges() throws {
-        let rows = try XCTUnwrap(CombinedModulesWidget.diskRAMLabels.stackedReadings(diskFreeBytes: 43_000_000_000, memoryFreeBytes: 4 * gibibyte))
-        let readings = [rows.disk, rows.memory]
+    func testStackedMenuBarKeepsItsWidthWhenValuesAndKeyboardChange() throws {
+        let style = CombinedModulesWidget.diskRAMLabels
+        let rows = try XCTUnwrap(style.stackedReadings(diskFreeBytes: 143_000_000_000, memoryFreeBytes: 12 * gibibyte))
+        let fewerDigits = try XCTUnwrap(style.stackedReadings(diskFreeBytes: 4_000_000_000, memoryFreeBytes: gibibyte))
+        let battery = StatusWidgetMetric.battery
+        let thresholds = battery.defaultThresholds
         let widget = StackedMenuBarView()
-        widget.update(readings, alignLabels: true, auxiliary: (.russian, nil))
+        widget.update([rows.disk, rows.memory], style: style, showsUnits: true, keyboard: "RU", battery: battery.reading(100, thresholds: thresholds, suffix: "%"))
         let width = widget.frame.width
-        widget.update(readings, alignLabels: true, auxiliary: (.english, "49%"))
+        widget.update([fewerDigits.disk, fewerDigits.memory], style: style, showsUnits: true, keyboard: "EN", battery: battery.reading(9, thresholds: thresholds, suffix: "%"))
         XCTAssertEqual(widget.frame.width, width)
 
         let canvas = NSImage(size: widget.frame.size)
@@ -87,14 +112,15 @@ class KitTests: XCTestCase {
         widget.draw(widget.bounds)
         canvas.unlockFocus()
 
-        widget.update(readings, alignLabels: true, auxiliary: nil)
+        widget.update([rows.disk, rows.memory], style: style, showsUnits: true, keyboard: nil, battery: nil)
         XCTAssertLessThan(widget.frame.width, width)
     }
 
     func testKeyboardAndBatteryUseCurrentInputLanguageAndWholePercentage() {
-        XCTAssertEqual(CompactMenuBar.KeyboardLanguage(languageTag: "ru-RU"), .russian)
-        XCTAssertEqual(CompactMenuBar.KeyboardLanguage(languageTag: "en-US"), .english)
-        XCTAssertNil(CompactMenuBar.KeyboardLanguage(languageTag: "de"))
+        XCTAssertEqual(CompactMenuBar.keyboardCode(languageTag: "ru-RU"), "RU")
+        XCTAssertEqual(CompactMenuBar.keyboardCode(languageTag: "en-US"), "EN")
+        XCTAssertEqual(CompactMenuBar.keyboardCode(languageTag: "de"), "DE")
+        XCTAssertNil(CompactMenuBar.keyboardCode(languageTag: "1"))
         XCTAssertEqual(CompactMenuBar.batteryPercentage(level: 0.29), "29%")
         XCTAssertEqual(CompactMenuBar.batteryPercentage(level: 0.49), "49%")
     }

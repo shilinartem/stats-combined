@@ -28,6 +28,7 @@ class SettingsWindow: NSWindow, NSWindowDelegate, NSToolbarDelegate {
     
     private var dashboard: NSView = Dashboard()
     private var settings: ApplicationSettings = ApplicationSettings()
+    private let statusWidgetSettings = StatusWidgetSettings()
     
     private var toggleButton: NSControl? = nil
     private var activeModuleName: String? = nil
@@ -227,6 +228,11 @@ class SettingsWindow: NSWindow, NSWindowDelegate, NSToolbarDelegate {
                 view = self.settings
                 self.toggleButton?.isHidden = true
                 self.settingsPreviewButton?.isHidden = true
+            } else if title == StatusWidgetSettings.title {
+                self.activeModuleName = nil
+                view = self.statusWidgetSettings
+                self.toggleButton?.isHidden = true
+                self.settingsPreviewButton?.isHidden = true
             }
             
             self.title = localizedString(title)
@@ -354,6 +360,8 @@ private class SidebarView: NSStackView {
         spacer.heightAnchor.constraint(equalToConstant: 10).isActive = true
         
         self.scrollView.stackView.addArrangedSubview(MenuItem(icon: self.dashboardIcon, title: "Dashboard"))
+        let statusIcon = NSImage(systemSymbolName: "rectangle.split.2x2", accessibilityDescription: nil)
+        self.scrollView.stackView.addArrangedSubview(MenuItem(icon: statusIcon, title: StatusWidgetSettings.title))
         self.scrollView.stackView.addArrangedSubview(spacer)
         
         self.supportPopover.behavior = .transient
@@ -405,7 +413,7 @@ private class SidebarView: NSStackView {
         list.reversed().forEach { (m: Module) in
             if !m.available { return }
             let menu: NSView = MenuItem(icon: m.config.icon, title: m.config.name)
-            self.scrollView.stackView.insertArrangedSubview(menu, at: 2)
+            self.scrollView.stackView.insertArrangedSubview(menu, at: 3)
         }
     }
     

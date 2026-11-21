@@ -391,8 +391,7 @@ public class MenuBar {
     private var queue: DispatchQueue
     
     private var combinedModules: Bool {
-        Store.shared.bool(key: "CombinedModules", defaultValue: false) &&
-            CombinedModulesWidget.current.includes(module: self.moduleType, keyboardAndBattery: CombinedModulesWidget.keyboardAndBattery)
+        CombinedModulesWidget.active?.includes(module: self.moduleType, showsBattery: StatusWidgetPreferences.showsBattery) == true
     }
     
     public var view: MenuBarView = MenuBarView()

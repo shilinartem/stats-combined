@@ -503,10 +503,7 @@ public enum CombinedModulesWidget: String {
             KeyValue_t(key: Self.icon.rawValue, value: "App icon"),
             KeyValue_t(key: Self.bars.rawValue, value: "Mini bars"),
             KeyValue_t(key: Self.rings.rawValue, value: "Concentric rings"),
-            KeyValue_t(key: Self.dial.rawValue, value: "Arc dial"),
-            KeyValue_t(key: Self.diskRAMNumbers.rawValue, value: "Disk and RAM: Numbers"),
-            KeyValue_t(key: Self.diskRAMUnits.rawValue, value: "Disk and RAM: Numbers with GB"),
-            KeyValue_t(key: Self.diskRAMLabels.rawValue, value: "Disk and RAM: SSD / RAM labels")
+            KeyValue_t(key: Self.dial.rawValue, value: "Arc dial")
         ]
     }
     
@@ -522,25 +519,130 @@ public enum CombinedModulesWidget: String {
 
     public var isDiskRAMStack: Bool { self == .diskRAMNumbers || self == .diskRAMUnits || self == .diskRAMLabels }
 
-    public static var keyboardAndBattery: Bool {
-        get { Store.shared.bool(key: "CombinedModules_keyboardAndBattery", defaultValue: false) }
-        set { Store.shared.set(key: "CombinedModules_keyboardAndBattery", value: newValue) }
+    public static var active: CombinedModulesWidget? {
+        if StatusWidgetPreferences.enabled { return StatusWidgetPreferences.layout }
+        guard Store.shared.bool(key: "CombinedModules", defaultValue: false), !current.isDiskRAMStack else { return nil }
+        return current
     }
 
-    public func includes(module: ModuleType, keyboardAndBattery: Bool) -> Bool {
-        !self.isDiskRAMStack || module == .disk || module == .RAM || (module == .battery && keyboardAndBattery)
+    public func includes(module: ModuleType, showsBattery: Bool) -> Bool {
+        !self.isDiskRAMStack || module == .disk || module == .RAM || (module == .battery && showsBattery)
     }
 
-    public func stackedReadings(diskFreeBytes: Int64?, memoryFreeBytes: Int64?) -> (disk: CompactMenuBar.Reading, memory: CompactMenuBar.Reading)? {
+    public func stackedReadings(
+        diskFreeBytes: Int64?, memoryFreeBytes: Int64?, showsUnits: Bool? = nil,
+        diskThresholds: StatusWidgetThresholds = StatusWidgetMetric.disk.defaultThresholds,
+        memoryThresholds: StatusWidgetThresholds = StatusWidgetMetric.memory.defaultThresholds
+    ) -> (disk: CompactMenuBar.Reading, memory: CompactMenuBar.Reading)? {
         guard self.isDiskRAMStack else { return nil }
-        let units = self == .diskRAMNumbers ? "" : " GB"
+        let units = (showsUnits ?? (self != .diskRAMNumbers)) ? " GB" : ""
         let diskLabel = self == .diskRAMLabels ? "SSD " : ""
         let memoryLabel = self == .diskRAMLabels ? "RAM " : ""
-        let disk = diskFreeBytes.flatMap { CompactMenuBar.disk(freeBytes: $0, template: diskLabel + "$capacity.free" + units) }
-        let memory = memoryFreeBytes.flatMap { CompactMenuBar.memory(freeBytes: $0, template: memoryLabel + "$mem.free" + units) }
         return (
-            disk ?? CompactMenuBar.Reading(text: diskLabel + "---" + units, tone: .normal),
-            memory ?? CompactMenuBar.Reading(text: memoryLabel + "--" + units, tone: .normal)
+            StatusWidgetMetric.disk.reading(diskFreeBytes.map { Double($0) / 1_000_000_000 }, thresholds: diskThresholds, prefix: diskLabel, suffix: units),
+            StatusWidgetMetric.memory.reading(memoryFreeBytes.map { Double($0) / 1_073_741_824 }, thresholds: memoryThresholds, prefix: memoryLabel, suffix: units)
         )
+    }
+}
+
+public struct StatusWidgetThresholds {
+    public let warning: Int
+    public let critical: Int
+
+    public init(warning: Int, critical: Int) {
+        self.warning = max(0, warning)
+        self.critical = min(self.warning, max(0, critical))
+    }
+}
+
+public enum StatusWidgetMetric: String, CaseIterable {
+    case disk, memory, battery
+
+    public var defaultThresholds: StatusWidgetThresholds {
+        switch self {
+        case .disk: return StatusWidgetThresholds(warning: 40, critical: 15)
+        case .memory: return StatusWidgetThresholds(warning: 2, critical: 1)
+        case .battery: return StatusWidgetThresholds(warning: 30, critical: 15)
+        }
+    }
+
+    public func reading(_ amount: Double?, thresholds: StatusWidgetThresholds, prefix: String = "", suffix: String = "") -> CompactMenuBar.Reading {
+        guard let amount, amount.isFinite else {
+            return CompactMenuBar.Reading(text: prefix + "–" + suffix, tone: .normal)
+        }
+        let value = max(0, amount)
+        let tone: CompactMenuBar.Tone
+        if self.below(value, threshold: thresholds.critical) {
+            tone = .red
+        } else if self.below(value, threshold: thresholds.warning) {
+            tone = self == .memory ? .orange : .yellow
+        } else {
+            tone = .normal
+        }
+        return CompactMenuBar.Reading(text: "\(prefix)\(Int(value))\(suffix)", tone: tone)
+    }
+
+    private func below(_ amount: Double, threshold: Int) -> Bool {
+        self == .disk ? amount < Double(threshold) : amount <= Double(threshold)
+    }
+}
+
+public enum StatusWidgetPreferences {
+    public static let layouts = [
+        KeyValue_t(key: CombinedModulesWidget.diskRAMNumbers.rawValue, value: "Numbers"),
+        KeyValue_t(key: CombinedModulesWidget.diskRAMUnits.rawValue, value: "Numbers with GB"),
+        KeyValue_t(key: CombinedModulesWidget.diskRAMLabels.rawValue, value: "SSD / RAM labels")
+    ]
+
+    public static var enabled: Bool {
+        get { Store.shared.bool(key: "StatusWidget_enabled", defaultValue: false) }
+        set { Store.shared.set(key: "StatusWidget_enabled", value: newValue) }
+    }
+
+    public static var layout: CombinedModulesWidget {
+        get {
+            let stored = Store.shared.string(key: "StatusWidget_layout", defaultValue: CombinedModulesWidget.diskRAMUnits.rawValue)
+            guard let style = CombinedModulesWidget(rawValue: stored), style.isDiskRAMStack else { return .diskRAMUnits }
+            return style
+        }
+        set { Store.shared.set(key: "StatusWidget_layout", value: newValue.rawValue) }
+    }
+
+    public static var showsUnits: Bool {
+        get { Store.shared.bool(key: "StatusWidget_units", defaultValue: layout != .diskRAMNumbers) }
+        set { Store.shared.set(key: "StatusWidget_units", value: newValue) }
+    }
+
+    public static var showsKeyboard: Bool {
+        get { Store.shared.bool(key: "StatusWidget_keyboard", defaultValue: true) }
+        set { Store.shared.set(key: "StatusWidget_keyboard", value: newValue) }
+    }
+
+    public static var showsBattery: Bool {
+        get { Store.shared.bool(key: "StatusWidget_battery", defaultValue: true) }
+        set { Store.shared.set(key: "StatusWidget_battery", value: newValue) }
+    }
+
+    public static func thresholds(for metric: StatusWidgetMetric) -> StatusWidgetThresholds {
+        let defaults = metric.defaultThresholds
+        return StatusWidgetThresholds(
+            warning: Store.shared.int(key: "StatusWidget_\(metric.rawValue)_warning", defaultValue: defaults.warning),
+            critical: Store.shared.int(key: "StatusWidget_\(metric.rawValue)_critical", defaultValue: defaults.critical)
+        )
+    }
+
+    public static func setThresholds(_ values: StatusWidgetThresholds, for metric: StatusWidgetMetric) {
+        Store.shared.set(key: "StatusWidget_\(metric.rawValue)_warning", value: values.warning)
+        Store.shared.set(key: "StatusWidget_\(metric.rawValue)_critical", value: values.critical)
+    }
+
+    public static func migrateCombinedLayout() {
+        guard !Store.shared.exist(key: "StatusWidget_enabled"), CombinedModulesWidget.current.isDiskRAMStack else { return }
+        layout = CombinedModulesWidget.current
+        showsUnits = layout != .diskRAMNumbers
+        showsKeyboard = Store.shared.bool(key: "CombinedModules_keyboardAndBattery", defaultValue: true)
+        enabled = Store.shared.bool(key: "CombinedModules", defaultValue: false)
+        CombinedModulesWidget.current = .widgets
+        Store.shared.set(key: "CombinedModules", value: false)
     }
 }

@@ -40,16 +40,10 @@ public enum CompactMenuBar {
         public let tone: Tone
     }
 
-    public enum KeyboardLanguage {
-        case russian, english
-
-        public init?(languageTag: String) {
-            switch languageTag.lowercased().split(separator: "-").first {
-            case "ru": self = .russian
-            case "en": self = .english
-            default: return nil
-            }
-        }
+    public static func keyboardCode(languageTag: String) -> String? {
+        guard let code = languageTag.split(whereSeparator: { $0 == "-" || $0 == "_" }).first,
+              (2...3).contains(code.count), code.utf8.allSatisfy({ (65...90).contains($0) || (97...122).contains($0) }) else { return nil }
+        return code.uppercased()
     }
 
     public static func disk(freeBytes: Int64, template: String = "$capacity.free") -> Reading? {

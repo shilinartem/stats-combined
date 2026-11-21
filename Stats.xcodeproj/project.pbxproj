@@ -169,6 +169,7 @@
 		9A6EEBBE2685259500897371 /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A6EEBBD2685259500897371 /* Logger.swift */; };
 		9A81C74D24499C7000825D92 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A81C74B24499C7000825D92 /* AppSettings.swift */; };
 		9A81C74E24499C7000825D92 /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A81C74C24499C7000825D92 /* Settings.swift */; };
+		4D9A7F2C6B5F420193AD7B11 /* StatusWidgetSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D9A7F2C6B5F420193AD7B12 /* StatusWidgetSettings.swift */; };
 		9A81C75D2449A41400825D92 /* RAM.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9A81C7562449A41400825D92 /* RAM.framework */; };
 		9A81C75E2449A41400825D92 /* RAM.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 9A81C7562449A41400825D92 /* RAM.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		9A81C7692449A43600825D92 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A81C7672449A43600825D92 /* main.swift */; };
@@ -715,6 +716,7 @@
 		9A6EEBBD2685259500897371 /* Logger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
 		9A81C74B24499C7000825D92 /* AppSettings.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		9A81C74C24499C7000825D92 /* Settings.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Settings.swift; sourceTree = "<group>"; };
+		4D9A7F2C6B5F420193AD7B12 /* StatusWidgetSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusWidgetSettings.swift; sourceTree = "<group>"; };
 		9A81C7562449A41400825D92 /* RAM.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = RAM.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		9A81C7592449A41400825D92 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		9A81C7672449A43600825D92 /* main.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
@@ -1222,6 +1224,7 @@
 			isa = PBXGroup;
 			children = (
 				9A81C74C24499C7000825D92 /* Settings.swift */,
+				4D9A7F2C6B5F420193AD7B12 /* StatusWidgetSettings.swift */,
 				9A045EB62594F8D100ED58F2 /* Dashboard.swift */,
 				9A81C74B24499C7000825D92 /* AppSettings.swift */,
 				9A9EA9442476D34500E3B883 /* Update.swift */,
@@ -2265,6 +2268,7 @@
 				9A9EA9452476D34500E3B883 /* Update.swift in Sources */,
 				9A045EB72594F8D100ED58F2 /* Dashboard.swift in Sources */,
 				9A81C74E24499C7000825D92 /* Settings.swift in Sources */,
+				4D9A7F2C6B5F420193AD7B11 /* StatusWidgetSettings.swift in Sources */,
 				9A81C74D24499C7000825D92 /* AppSettings.swift in Sources */,
 				5C21D80B296C7B81005BA16D /* CombinedView.swift in Sources */,
 				9A83526F2889A03100791BAC /* Setup.swift in Sources */,

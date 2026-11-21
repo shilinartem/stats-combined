@@ -136,9 +136,17 @@ public class Battery: Module {
         return !sources.isEmpty
     }
 
-    public var visibleBatteryPercentage: String? {
-        guard self.enabled, self.menuBar.presentationVisible, let value = self.usageReader?.value else { return nil }
-        return CompactMenuBar.batteryPercentage(level: value.level)
+    public var chargeLevel: Double? {
+        if self.enabled, let value = self.usageReader?.value, value.available == true { return value.level }
+        guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [CFTypeRef] else { return nil }
+        for source in sources {
+            guard let details = IOPSGetPowerSourceDescription(snapshot, source)?.takeUnretainedValue() as? [String: Any],
+                  details[kIOPSTypeKey] as? String == kIOPSInternalBatteryType,
+                  let percent = details[kIOPSCurrentCapacityKey] as? Int else { continue }
+            return Double(min(100, max(0, percent))) / 100
+        }
+        return nil
     }
     
     private func usageCallback(_ raw: Battery_Usage?) {

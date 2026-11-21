@@ -166,10 +166,6 @@ class ApplicationSettings: NSStackView {
                 callback: self.setCombinedModulesModifierKeys,
                 value: self.combinedModulesModifierKeys,
                 modifierKeys: [58, 60]
-            )),
-            PreferencesRow("Keyboard and battery", component: switchView(
-                action: #selector(self.toggleStackedKeyboardAndBattery),
-                state: CombinedModulesWidget.keyboardAndBattery
             ))
         ])
         scrollView.stackView.addArrangedSubview(self.combinedModulesView!)
@@ -402,29 +398,18 @@ class ApplicationSettings: NSStackView {
     
     private func updateCombinedModulesSettings() {
         self.combinedModulesView?.setRowVisibility(1, newState: self.combinedModulesState)
-        self.combinedModulesView?.setRowVisibility(2, newState: self.combinedModulesState && CombinedModulesWidget.current != .icon && !CombinedModulesWidget.current.isDiskRAMStack)
+        self.combinedModulesView?.setRowVisibility(2, newState: self.combinedModulesState && CombinedModulesWidget.current != .icon)
         for row in 3...6 {
             self.combinedModulesView?.setRowVisibility(row, newState: self.combinedModulesState && CombinedModulesWidget.current == .widgets)
         }
         self.combinedModulesView?.setRowVisibility(7, newState: self.combinedModulesState && CombinedModulesWidget.current == .widgets && self.combinedModulesAlternateDetails)
-        self.combinedModulesView?.setRowVisibility(8, newState: self.combinedModulesState && CombinedModulesWidget.current.isDiskRAMStack)
     }
     
     @objc private func toggleCombinedModulesWidget(_ sender: NSMenuItem) {
         guard let key = sender.representedObject as? String, let widget = CombinedModulesWidget(rawValue: key) else { return }
-        let changesGrouping = CombinedModulesWidget.current.isDiskRAMStack != widget.isDiskRAMStack
         CombinedModulesWidget.current = widget
         self.updateCombinedModulesSettings()
-        if changesGrouping {
-            NotificationCenter.default.post(name: .toggleOneView, object: nil)
-        }
         NotificationCenter.default.post(name: .moduleRearrange, object: nil, userInfo: nil)
-    }
-
-    @objc private func toggleStackedKeyboardAndBattery(_ sender: NSButton) {
-        CombinedModulesWidget.keyboardAndBattery = sender.state == .on
-        NotificationCenter.default.post(name: .toggleOneView, object: nil)
-        NotificationCenter.default.post(name: .moduleRearrange, object: nil)
     }
     
     @objc private func toggleCombinedModulesSpacing(_ sender: NSMenuItem) {
