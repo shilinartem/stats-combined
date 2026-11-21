@@ -17,12 +17,26 @@ class KitTests: XCTestCase {
     private let gibibyte: Int64 = 1 << 30
 
     func testCompactMenuBarUsesFixedWidthWholeGigabytes() {
-        XCTAssertEqual(CompactMenuBar.disk(freeBytes: 43_999_999_999).text, "043")
-        XCTAssertEqual(CompactMenuBar.disk(freeBytes: 100_000_000_000).text, "100")
-        XCTAssertEqual(CompactMenuBar.disk(freeBytes: 1_000_000_000_000).text, "999")
-        XCTAssertEqual(CompactMenuBar.memory(freeBytes: 5 * gibibyte - 1).text, "04")
-        XCTAssertEqual(CompactMenuBar.memory(freeBytes: 0).text, "00")
-        XCTAssertEqual(CompactMenuBar.memory(freeBytes: 100 * gibibyte).text, "99")
+        XCTAssertEqual(CompactMenuBar.disk(freeBytes: 43_999_999_999)?.text, "043")
+        XCTAssertEqual(CompactMenuBar.disk(freeBytes: 100_000_000_000)?.text, "100")
+        XCTAssertEqual(CompactMenuBar.disk(freeBytes: 1_000_000_000_000)?.text, "999")
+        XCTAssertEqual(CompactMenuBar.memory(freeBytes: 5 * gibibyte - 1)?.text, "04")
+        XCTAssertEqual(CompactMenuBar.memory(freeBytes: 0)?.text, "00")
+        XCTAssertEqual(CompactMenuBar.memory(freeBytes: 100 * gibibyte)?.text, "99")
+    }
+
+    func testCompactMenuBarFormatsValuesAndLeavesUnitsAsLiteralText() throws {
+        let disk = try XCTUnwrap(CompactMenuBar.disk(freeBytes: 43_590_000_000, template: "$capacity.free[000] GB"))
+        XCTAssertEqual(disk.text, "043 GB")
+        let ram = try XCTUnwrap(CompactMenuBar.memory(freeBytes: gibibyte + gibibyte / 2, template: "$mem.free[00.0] ГБ"))
+        XCTAssertEqual(ram.text, "01.5 ГБ")
+        XCTAssertEqual(ram.tone, .orange)
+    }
+
+    func testCompactMenuBarTemplateLeavesOtherVariablesAvailable() throws {
+        let disk = try XCTUnwrap(CompactMenuBar.disk(freeBytes: 43_590_000_000, template: "SSD $capacity.free[000.00] / $capacity.total"))
+        XCTAssertEqual(disk.text, "SSD 043.59 / $capacity.total")
+        XCTAssertNil(CompactMenuBar.disk(freeBytes: 0, template: "$capacity.freedom"))
     }
 
     @MainActor
@@ -31,7 +45,7 @@ class KitTests: XCTestCase {
         canvas.lockFocus()
         defer { canvas.unlockFocus() }
 
-        for (normal, critical) in [("111", "008"), ("11", "00")] {
+        for (normal, critical) in [("111 GB", "008 GB"), ("11 GB", "00 GB")] {
             let view = TextWidget(title: "Metrics")
             view.setValue(normal, tone: .normal)
             view.draw(view.bounds)
@@ -43,17 +57,17 @@ class KitTests: XCTestCase {
     }
 
     func testCompactMenuBarDiskColorsUseStrictByteThresholds() {
-        XCTAssertEqual(CompactMenuBar.disk(freeBytes: 40_000_000_000).tone, .normal)
-        XCTAssertEqual(CompactMenuBar.disk(freeBytes: 39_999_999_999).tone, .yellow)
-        XCTAssertEqual(CompactMenuBar.disk(freeBytes: 15_000_000_000).tone, .yellow)
-        XCTAssertEqual(CompactMenuBar.disk(freeBytes: 14_999_999_999).tone, .red)
+        XCTAssertEqual(CompactMenuBar.disk(freeBytes: 40_000_000_000)?.tone, .normal)
+        XCTAssertEqual(CompactMenuBar.disk(freeBytes: 39_999_999_999)?.tone, .yellow)
+        XCTAssertEqual(CompactMenuBar.disk(freeBytes: 15_000_000_000)?.tone, .yellow)
+        XCTAssertEqual(CompactMenuBar.disk(freeBytes: 14_999_999_999)?.tone, .red)
     }
 
     func testCompactMenuBarRAMColorsUseInclusiveByteThresholds() {
-        XCTAssertEqual(CompactMenuBar.memory(freeBytes: 2 * gibibyte + 1).tone, .normal)
-        XCTAssertEqual(CompactMenuBar.memory(freeBytes: 2 * gibibyte).tone, .orange)
-        XCTAssertEqual(CompactMenuBar.memory(freeBytes: gibibyte + 1).tone, .orange)
-        XCTAssertEqual(CompactMenuBar.memory(freeBytes: gibibyte).tone, .red)
+        XCTAssertEqual(CompactMenuBar.memory(freeBytes: 2 * gibibyte + 1)?.tone, .normal)
+        XCTAssertEqual(CompactMenuBar.memory(freeBytes: 2 * gibibyte)?.tone, .orange)
+        XCTAssertEqual(CompactMenuBar.memory(freeBytes: gibibyte + 1)?.tone, .orange)
+        XCTAssertEqual(CompactMenuBar.memory(freeBytes: gibibyte)?.tone, .red)
     }
 
     func testCompactMenuBarBatteryOnlyShowsWhenUnpluggedBelowHalf() {

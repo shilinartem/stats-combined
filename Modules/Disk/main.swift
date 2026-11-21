@@ -273,6 +273,11 @@ public class Disk: Module {
             self?.capacityReader?.read()
             self?.smartReader?.read()
         }
+        self.settingsView.textValueChanged = { [weak self] in
+            guard let self, let disks = self.capacityReader?.value, let drive = self.displayedDrive(in: disks),
+                  let widget = self.menuBar.activeWidgets.first(where: { $0.type == .text })?.item as? TextWidget else { return }
+            self.renderText(widget, drive: drive)
+        }
         self.settingsView.setInterval = { [weak self] value in
             self?.capacityReader?.setInterval(value)
         }
@@ -299,7 +304,7 @@ public class Disk: Module {
         })
         self.settingsView.setList(value)
         
-        guard let d = value.first(where: { $0.mediaName == self.selectedDisk }) ?? value.first(where: { $0.root }) else {
+        guard let d = self.displayedDrive(in: value) else {
             self.summaryCallback(nil)
             return
         }
@@ -319,45 +324,7 @@ public class Disk: Module {
                     ColorValue(d.percentage, color: self.mainColor)
                 ])
             case let widget as TextWidget:
-                var text = "\(self.textValue)"
-                if text == "$capacity.free" {
-                    let reading = CompactMenuBar.disk(freeBytes: d.free)
-                    widget.setValue(reading.text, tone: reading.tone)
-                    break
-                }
-                let pairs = TextWidget.parseText(text)
-                pairs.forEach { pair in
-                    var replacement: String? = nil
-                    
-                    switch pair.key {
-                    case "$capacity":
-                        switch pair.value {
-                        case "total": replacement = DiskSize(d.size).getReadableMemory()
-                        case "used": replacement = DiskSize(d.size - d.free).getReadableMemory()
-                        case "free": replacement = DiskSize(d.free).getReadableMemory()
-                        default: return
-                        }
-                    case "$percentage":
-                        var percentage: Int
-                        if d.size == 0 {
-                            percentage = 0
-                        } else {
-                            switch pair.value {
-                            case "used": percentage = Int((Double(d.size - d.free) / Double(d.size)) * 100)
-                            case "free": percentage = Int((Double(d.free) / Double(d.size)) * 100)
-                            default: return
-                            }
-                        }
-                        replacement = "\(percentage < 0 ? 0 : percentage)%"
-                    default: return
-                    }
-                    
-                    if let replacement {
-                        let key = pair.value.isEmpty ? pair.key : "\(pair.key).\(pair.value)"
-                        text = text.replacingOccurrences(of: key, with: replacement)
-                    }
-                }
-                widget.setValue(text)
+                self.renderText(widget, drive: d)
             default: break
             }
         }
@@ -367,6 +334,49 @@ public class Disk: Module {
         }
     }
     
+    private func displayedDrive(in disks: Disks) -> drive? {
+        disks.first(where: { $0.mediaName == self.selectedDisk }) ?? disks.first(where: { $0.root })
+    }
+
+    private func renderText(_ widget: TextWidget, drive d: drive) {
+        let template = self.textValue
+        let reading = CompactMenuBar.disk(freeBytes: d.free, template: template)
+        var text = reading?.text ?? template
+        let pairs = TextWidget.parseText(text)
+        pairs.forEach { pair in
+            var replacement: String? = nil
+
+            switch pair.key {
+            case "$capacity":
+                switch pair.value {
+                case "total": replacement = DiskSize(d.size).getReadableMemory()
+                case "used": replacement = DiskSize(d.size - d.free).getReadableMemory()
+                case "free": replacement = DiskSize(d.free).getReadableMemory()
+                default: return
+                }
+            case "$percentage":
+                var percentage: Int
+                if d.size == 0 {
+                    percentage = 0
+                } else {
+                    switch pair.value {
+                    case "used": percentage = Int((Double(d.size - d.free) / Double(d.size)) * 100)
+                    case "free": percentage = Int((Double(d.free) / Double(d.size)) * 100)
+                    default: return
+                    }
+                }
+                replacement = "\(percentage < 0 ? 0 : percentage)%"
+            default: return
+            }
+
+            if let replacement {
+                let key = pair.value.isEmpty ? pair.key : "\(pair.key).\(pair.value)"
+                text = text.replacingOccurrences(of: key, with: replacement)
+            }
+        }
+        widget.setValue(text, tone: reading?.tone)
+    }
+
     private func activityCallback(_ value: Disks) {
         guard self.enabled else { return }
         
@@ -375,7 +385,7 @@ public class Disk: Module {
             self.previewView.activityCallback(value)
         })
         
-        guard let d = value.first(where: { $0.mediaName == self.selectedDisk }) ?? value.first(where: { $0.root }) else {
+        guard let d = self.displayedDrive(in: value) else {
             return
         }
         

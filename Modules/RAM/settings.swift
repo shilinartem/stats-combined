@@ -14,13 +14,15 @@ import Kit
 
 var textWidgetHelp = """
 <h2>Description</h2>
-You can use a combination of any of the variables.
+You can combine variables with ordinary text. For free memory, zeros in brackets set the number of digits.
+Add zeros after a dot to show decimal places, or omit the dot for a whole number. Write GB after the brackets to show the unit.
 <h3>Examples:</h3>
 <ul>
 <li>$mem.used/$mem.total ($pressure.value)</li>
 <li>Pressure: $pressure.value</li>
 <li>Pressure: $pressure.percentage</li>
-<li>Free: $mem.free</li>
+<li>$mem.free[00] GB</li>
+<li>$mem.free[00.0]</li>
 </ul>
 <h2>Available variables</h2>
 <ul>
@@ -56,6 +58,7 @@ internal class Settings: NSStackView, Settings_v, NSTextFieldDelegate {
     private let title: String
     
     public var callback: (() -> Void) = {}
+    public var textValueChanged: (() -> Void) = {}
     public var callbackWhenUpdateNumberOfProcesses: (() -> Void) = {}
     public var setInterval: ((_ value: Int) -> Void) = {_ in }
     public var setTopInterval: ((_ value: Int) -> Void) = {_ in }
@@ -182,6 +185,7 @@ internal class Settings: NSStackView, Settings_v, NSTextFieldDelegate {
             if field.identifier == NSUserInterfaceItemIdentifier("text") {
                 self.textValue = field.stringValue
                 Store.shared.set(key: "\(self.title)_textWidgetValue", value: self.textValue)
+                self.textValueChanged()
             }
         }
     }

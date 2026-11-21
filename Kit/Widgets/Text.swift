@@ -14,6 +14,11 @@ import Cocoa
 public enum CompactMenuBar {
     private static let gigabyte: Int64 = 1_000_000_000
     private static let gibibyte: Int64 = 1 << 30
+    public static let defaultDiskTemplate = "$capacity.free[000] GB"
+    public static let defaultMemoryTemplate = "$mem.free[00] GB"
+
+    private static let diskExpression = formatExpression(for: "$capacity.free")
+    private static let memoryExpression = formatExpression(for: "$mem.free")
 
     public enum Tone: Equatable {
         case normal, yellow, orange, red
@@ -35,26 +40,58 @@ public enum CompactMenuBar {
         public let tone: Tone
     }
 
-    public static func disk(freeBytes: Int64) -> Reading {
+    public static func disk(freeBytes: Int64, template: String = "$capacity.free") -> Reading? {
         let tone: Tone
         switch freeBytes {
         case ..<(15 * gigabyte): tone = .red
         case ..<(40 * gigabyte): tone = .yellow
         default: tone = .normal
         }
-        let count = min(999, max(0, freeBytes / gigabyte))
-        return Reading(text: String(format: "%03lld", count), tone: tone)
+        return render(template, expression: diskExpression, bytes: freeBytes, format: (gigabyte, 3), tone: tone)
     }
 
-    public static func memory(freeBytes: Int64) -> Reading {
+    public static func memory(freeBytes: Int64, template: String = "$mem.free") -> Reading? {
         let tone: Tone
         switch freeBytes {
         case ...gibibyte: tone = .red
         case ...(2 * gibibyte): tone = .orange
         default: tone = .normal
         }
-        let count = min(99, max(0, freeBytes / gibibyte))
-        return Reading(text: String(format: "%02lld", count), tone: tone)
+        return render(template, expression: memoryExpression, bytes: freeBytes, format: (gibibyte, 2), tone: tone)
+    }
+
+    private static func formatExpression(for variable: String) -> NSRegularExpression? {
+        let token = NSRegularExpression.escapedPattern(for: variable)
+        return try? NSRegularExpression(pattern: "\(token)(?![a-zA-Z0-9_])(?:\\[(0{1,6})(?:\\.(0{1,3}))?\\]|(?!\\[))")
+    }
+
+    private static func render(_ template: String, expression: NSRegularExpression?, bytes: Int64, format: (unit: Int64, digits: Int), tone: Tone) -> Reading? {
+        guard let expression else { return nil }
+        let matches = expression.matches(in: template, range: NSRange(template.startIndex..., in: template))
+        guard !matches.isEmpty else { return nil }
+
+        let (unit, digits) = format
+        let rendered = NSMutableString(string: template)
+        for match in matches.reversed() {
+            let width = match.range(at: 1).length > 0 ? match.range(at: 1).length : digits
+            let precision = match.range(at: 2).length
+            let limit = (0..<width).reduce(Int64(0)) { limit, _ in limit * 10 + 9 }
+            let value = max(0, bytes)
+            let whole = value / unit
+            var number = padded(min(whole, limit), digits: width)
+            if precision > 0 {
+                let scale = (0..<precision).reduce(Int64(1)) { scale, _ in scale * 10 }
+                let fraction = whole > limit ? scale - 1 : (value % unit) * scale / unit
+                number += "." + padded(fraction, digits: precision)
+            }
+            rendered.replaceCharacters(in: match.range, with: number)
+        }
+        return Reading(text: rendered as String, tone: tone)
+    }
+
+    private static func padded(_ value: Int64, digits: Int) -> String {
+        let text = String(value)
+        return String(repeating: "0", count: max(0, digits - text.count)) + text
     }
 
     public static func showsBattery(level: Double, onBatteryPower: Bool, isCharging: Bool) -> Bool {

@@ -140,6 +140,11 @@ public class RAM: Module {
             }
         }
         
+        self.settingsView.textValueChanged = { [weak self] in
+            guard let self, let value = self.usageReader?.value,
+                  let widget = self.menuBar.activeWidgets.first(where: { $0.type == .text })?.item as? TextWidget else { return }
+            self.renderText(widget, usage: value)
+        }
         self.settingsView.callbackWhenUpdateNumberOfProcesses = { [weak self] in
             self?.popupView.numberOfProcessesUpdated()
             self?.previewView.numberOfProcessesUpdated()
@@ -199,55 +204,7 @@ public class RAM: Module {
                     ColorValue(value.compressed/total, color: self.compressedColor)
                 ])
             case let widget as TextWidget:
-                var text = "\(self.textValue)"
-                if text == "$mem.free" {
-                    let reading = CompactMenuBar.memory(freeBytes: Int64(value.free))
-                    widget.setValue(reading.text, tone: reading.tone)
-                    break
-                }
-                let pairs = TextWidget.parseText(text)
-                pairs.forEach { pair in
-                    var replacement: String? = nil
-                    
-                    switch pair.key {
-                    case "$mem":
-                        switch pair.value {
-                        case "total": replacement = Units(bytes: Int64(value.total)).getReadableMemory(style: .memory)
-                        case "used": replacement = Units(bytes: Int64(value.used)).getReadableMemory(style: .memory)
-                        case "free": replacement = Units(bytes: Int64(value.free)).getReadableMemory(style: .memory)
-                        case "active": replacement = Units(bytes: Int64(value.active)).getReadableMemory(style: .memory)
-                        case "inactive": replacement = Units(bytes: Int64(value.inactive)).getReadableMemory(style: .memory)
-                        case "wired": replacement = Units(bytes: Int64(value.wired)).getReadableMemory(style: .memory)
-                        case "compressed": replacement = Units(bytes: Int64(value.compressed)).getReadableMemory(style: .memory)
-                        case "app": replacement = Units(bytes: Int64(value.app)).getReadableMemory(style: .memory)
-                        case "cache": replacement = Units(bytes: Int64(value.cache)).getReadableMemory(style: .memory)
-                        case "swapins": replacement = "\(value.swapins)"
-                        case "swapouts": replacement = "\(value.swapouts)"
-                        default: return
-                        }
-                    case "$swap":
-                        switch pair.value {
-                        case "total": replacement = Units(bytes: Int64(value.swap.total)).getReadableMemory(style: .memory)
-                        case "used": replacement = Units(bytes: Int64(value.swap.used)).getReadableMemory(style: .memory)
-                        case "free": replacement = Units(bytes: Int64(value.swap.free)).getReadableMemory(style: .memory)
-                        default: return
-                        }
-                    case "$pressure":
-                        switch pair.value {
-                        case "level": replacement = "\(value.pressure.level)"
-                        case "value": replacement = value.pressure.value.rawValue
-                        case "percentage": replacement = value.pressure.percentage.map { "\($0)%" } ?? "-"
-                        default: return
-                        }
-                    default: return
-                    }
-                    
-                    if let replacement {
-                        let key = pair.value.isEmpty ? pair.key : "\(pair.key).\(pair.value)"
-                        text = text.replacingOccurrences(of: key, with: replacement)
-                    }
-                }
-                widget.setValue(text)
+                self.renderText(widget, usage: value)
             case let widget as DotWidget: widget.setValue(value.pressure.value.pressureColor())
             default: break
             }
@@ -256,5 +213,54 @@ public class RAM: Module {
         if self.systemWidgetsUpdatesState {
             SystemWidgetUpdates.shared.update(value, key: "RAM@UsageReader", kinds: [RAM_entry.kind, "UnitedWidget"], defaults: self.userDefaults)
         }
+    }
+
+    private func renderText(_ widget: TextWidget, usage value: RAM_Usage) {
+        let template = self.textValue
+        let reading = CompactMenuBar.memory(freeBytes: Int64(value.free), template: template)
+        var text = reading?.text ?? template
+        let pairs = TextWidget.parseText(text)
+        pairs.forEach { pair in
+            var replacement: String? = nil
+
+            switch pair.key {
+            case "$mem":
+                switch pair.value {
+                case "total": replacement = Units(bytes: Int64(value.total)).getReadableMemory(style: .memory)
+                case "used": replacement = Units(bytes: Int64(value.used)).getReadableMemory(style: .memory)
+                case "free": replacement = Units(bytes: Int64(value.free)).getReadableMemory(style: .memory)
+                case "active": replacement = Units(bytes: Int64(value.active)).getReadableMemory(style: .memory)
+                case "inactive": replacement = Units(bytes: Int64(value.inactive)).getReadableMemory(style: .memory)
+                case "wired": replacement = Units(bytes: Int64(value.wired)).getReadableMemory(style: .memory)
+                case "compressed": replacement = Units(bytes: Int64(value.compressed)).getReadableMemory(style: .memory)
+                case "app": replacement = Units(bytes: Int64(value.app)).getReadableMemory(style: .memory)
+                case "cache": replacement = Units(bytes: Int64(value.cache)).getReadableMemory(style: .memory)
+                case "swapins": replacement = "\(value.swapins)"
+                case "swapouts": replacement = "\(value.swapouts)"
+                default: return
+                }
+            case "$swap":
+                switch pair.value {
+                case "total": replacement = Units(bytes: Int64(value.swap.total)).getReadableMemory(style: .memory)
+                case "used": replacement = Units(bytes: Int64(value.swap.used)).getReadableMemory(style: .memory)
+                case "free": replacement = Units(bytes: Int64(value.swap.free)).getReadableMemory(style: .memory)
+                default: return
+                }
+            case "$pressure":
+                switch pair.value {
+                case "level": replacement = "\(value.pressure.level)"
+                case "value": replacement = value.pressure.value.rawValue
+                case "percentage": replacement = value.pressure.percentage.map { "\($0)%" } ?? "-"
+                default: return
+                }
+            default: return
+            }
+
+            if let replacement {
+                let key = pair.value.isEmpty ? pair.key : "\(pair.key).\(pair.value)"
+                text = text.replacingOccurrences(of: key, with: replacement)
+            }
+        }
+        widget.setValue(text, tone: reading?.tone)
     }
 }

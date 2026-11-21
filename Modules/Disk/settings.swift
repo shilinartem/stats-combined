@@ -14,11 +14,13 @@ import Kit
 
 var textWidgetHelp = """
 <h2>Description</h2>
-You can use a combination of any of the variables.
+You can combine variables with ordinary text. For free space, zeros in brackets set the number of digits.
+Add zeros after a dot to show decimal places, or omit the dot for a whole number. Write GB after the brackets to show the unit.
 <h3>Examples:</h3>
 <ul>
-<li>$capacity.free/$capacity.total</li>
-<li>Free: $capacity.free ($percentage.used)</li>
+<li>$capacity.free[000] GB</li>
+<li>$capacity.free[000.0]</li>
+<li>$capacity.free[000] GB / $capacity.total</li>
 <li>Used: $capacity.used ($percentage.used)</li>
 </ul>
 <h2>Available variables</h2>
@@ -46,6 +48,7 @@ internal class Settings: NSStackView, Settings_v, NSTextFieldDelegate {
     
     public var selectedDiskHandler: (String) -> Void = {_ in }
     public var callback: (() -> Void) = {}
+    public var textValueChanged: (() -> Void) = {}
     public var setInterval: ((_ value: Int) -> Void) = {_ in }
     public var setSMARTInterval: ((_ value: Int) -> Void) = {_ in }
     public var callbackWhenUpdateNumberOfProcesses: (() -> Void) = {}
@@ -247,6 +250,7 @@ internal class Settings: NSStackView, Settings_v, NSTextFieldDelegate {
             if field.identifier == NSUserInterfaceItemIdentifier("text") {
                 self.textValue = field.stringValue
                 Store.shared.set(key: "\(self.title)_textWidgetValue", value: self.textValue)
+                self.textValueChanged()
             }
         }
     }
