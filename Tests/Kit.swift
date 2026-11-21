@@ -40,34 +40,27 @@ class KitTests: XCTestCase {
         XCTAssertNil(CompactMenuBar.disk(freeBytes: 0, template: "$capacity.freedom"))
     }
 
-    func testStackedMenuBarHasThreeDiskAboveRAMFormats() throws {
-        let variants: [(CombinedModulesWidget, String, String)] = [
+    func testStatusWidgetRetainsPreviousFormatsAsPerCellDefaults() {
+        let formats: [(CombinedModulesWidget, String, String)] = [
             (.diskRAMNumbers, "43", "4"),
             (.diskRAMUnits, "43 GB", "4 GB"),
             (.diskRAMLabels, "SSD 43 GB", "RAM 4 GB")
         ]
-        for (style, disk, memory) in variants {
-            let rows = try XCTUnwrap(style.stackedReadings(diskFreeBytes: 43_500_000_000, memoryFreeBytes: 4 * gibibyte))
-            XCTAssertEqual(rows.disk.text, disk)
-            XCTAssertEqual(rows.memory.text, memory)
+        for (style, disk, memory) in formats {
+            let usesUnits = style != .diskRAMNumbers
+            XCTAssertEqual(StatusWidgetCell.disk.render(
+                StatusWidgetCell.disk.defaultFormat(for: style), value: .storage(43_500_000_000), showsUnits: usesUnits
+            ), disk)
+            XCTAssertEqual(StatusWidgetCell.memory.render(
+                StatusWidgetCell.memory.defaultFormat(for: style), value: .storage(4 * gibibyte), showsUnits: usesUnits
+            ), memory)
         }
     }
 
-    func testStackedMenuBarRetainsAlertColorsAndShowsWhenReadingsAreMissing() throws {
-        let rows = try XCTUnwrap(CombinedModulesWidget.diskRAMLabels.stackedReadings(diskFreeBytes: 14_000_000_000, memoryFreeBytes: gibibyte))
-        XCTAssertEqual(rows.disk.tone, .red)
-        XCTAssertEqual(rows.memory.tone, .red)
-        let missing = try XCTUnwrap(CombinedModulesWidget.diskRAMLabels.stackedReadings(diskFreeBytes: nil, memoryFreeBytes: nil))
-        XCTAssertEqual(missing.disk.text, "SSD – GB")
-        XCTAssertEqual(missing.memory.text, "RAM – GB")
-    }
-
-    func testStatusWidgetCanHideUnitsWhileKeepingLabelsAndLargeValues() throws {
-        let rows = try XCTUnwrap(CombinedModulesWidget.diskRAMLabels.stackedReadings(
-            diskFreeBytes: 1_207_000_000_000, memoryFreeBytes: 4 * gibibyte, showsUnits: false
-        ))
-        XCTAssertEqual(rows.disk.text, "SSD 1207")
-        XCTAssertEqual(rows.memory.text, "RAM 4")
+    func testStatusWidgetRendersUnavailableAndLargeValuesInCustomFormats() {
+        XCTAssertEqual(StatusWidgetCell.disk.render("SSD $capacity.free$unit", value: .storage(nil), showsUnits: true), "SSD – GB")
+        XCTAssertEqual(StatusWidgetCell.memory.render("RAM $mem.free$unit", value: .storage(nil), showsUnits: true), "RAM – GB")
+        XCTAssertEqual(StatusWidgetCell.disk.render("SSD $capacity.free$unit", value: .storage(1_207_000_000_000)), "SSD 1207")
     }
 
     func testStatusWidgetAlwaysFormatsBatteryAndUsesConfiguredThresholds() {
@@ -116,45 +109,77 @@ class KitTests: XCTestCase {
         XCTAssertEqual(percentage.label.text, "49%")
     }
 
-    func testStackedMenuBarMovesBatteryIntoTheOptionalColumnOnly() {
+    func testStatusWidgetFormatsEachCellIndependently() {
+        XCTAssertEqual(StatusWidgetCell.disk.render("SSD $capacity.free$unit", value: .storage(43_500_000_000), showsUnits: true), "SSD 43 GB")
+        XCTAssertEqual(StatusWidgetCell.disk.render("SSD $capacity.free$unit", value: .storage(43_500_000_000)), "SSD 43")
+        XCTAssertEqual(StatusWidgetCell.disk.render("$capacity.free[.0]$unit", value: .storage(43_500_000_000), showsUnits: true), "43.5 GB")
+        XCTAssertEqual(StatusWidgetCell.memory.render("$mem.free[00.0]$unit", value: .storage(4 * gibibyte + gibibyte / 2)), "04.5")
+        XCTAssertEqual(StatusWidgetCell.keyboard.render("[$layout]", value: .keyboard("RU")), "[RU]")
+        XCTAssertEqual(StatusWidgetCell.battery.render("BAT $battery.level", value: .battery(42)), "BAT 42%")
+    }
+
+    func testStatusWidgetOwnsDiskMemoryAndBatteryWhileEnabled() {
         let style = CombinedModulesWidget.diskRAMUnits
-        XCTAssertTrue(style.includes(module: .disk, showsBattery: false))
-        XCTAssertTrue(style.includes(module: .RAM, showsBattery: false))
-        XCTAssertFalse(style.includes(module: .battery, showsBattery: false))
-        XCTAssertTrue(style.includes(module: .battery, showsBattery: true))
-        XCTAssertFalse(style.includes(module: .CPU, showsBattery: true))
-        XCTAssertTrue(CombinedModulesWidget.widgets.includes(module: .CPU, showsBattery: false))
+        XCTAssertTrue(style.includes(module: .disk))
+        XCTAssertTrue(style.includes(module: .RAM))
+        XCTAssertTrue(style.includes(module: .battery))
+        XCTAssertFalse(style.includes(module: .CPU))
+        XCTAssertTrue(CombinedModulesWidget.widgets.includes(module: .CPU))
     }
 
     @MainActor
-    func testStackedMenuBarKeepsItsWidthWhenValuesAndKeyboardChange() throws {
-        let style = CombinedModulesWidget.diskRAMLabels
-        let rows = try XCTUnwrap(style.stackedReadings(diskFreeBytes: 1_430_000_000_000, memoryFreeBytes: 12 * gibibyte))
-        let fewerDigits = try XCTUnwrap(style.stackedReadings(diskFreeBytes: 4_000_000_000, memoryFreeBytes: gibibyte))
+    func testStackedMenuBarKeepsItsWidthWhenValuesAndKeyboardChange() {
         let thresholds = StatusWidgetMetric.battery.defaultThresholds
         let widget = CountingStackedMenuBarView()
         let full = StatusWidgetBatteryReading(level: 1, isDischarging: false, thresholds: thresholds, showsIcon: true, isOnACPower: true)
-        widget.update([rows.disk, rows.memory], style: style, showsUnits: true, minimumDigits: 4, indicators: ("RU", full))
+        let low = StatusWidgetBatteryReading(level: 0.09, isDischarging: true, thresholds: thresholds, showsIcon: true)
+        let disk = StatusWidgetDisplayCell(text: "SSD 1430 GB", widthSample: "SSD 2048 GB")
+        let memory = StatusWidgetDisplayCell(text: "RAM 12 GB", widthSample: "RAM 18 GB")
+        let russian = StatusWidgetDisplayCell(text: "RU", widthSample: "ABC")
+        let english = StatusWidgetDisplayCell(text: "EN", widthSample: "ABC")
+        let plug = StatusWidgetDisplayCell(text: "100%", widthSample: "100%", batteryIcon: full)
+        let lowBattery = StatusWidgetDisplayCell(text: "9%", widthSample: "100%", tone: .red, batteryIcon: low)
+
+        widget.update([disk, russian, memory, plug])
         let width = widget.frame.width
         let resizeCount = widget.resizeCount
-        let low = StatusWidgetBatteryReading(level: 0.09, isDischarging: true, thresholds: thresholds, showsIcon: true)
-        widget.update([fewerDigits.disk, fewerDigits.memory], style: style, showsUnits: true, minimumDigits: 4, indicators: ("EN", low))
+        widget.update([
+            StatusWidgetDisplayCell(text: "SSD 4 GB", widthSample: disk.widthSample), english,
+            StatusWidgetDisplayCell(text: "RAM 1 GB", widthSample: memory.widthSample), lowBattery
+        ])
         XCTAssertEqual(widget.frame.width, width)
         XCTAssertEqual(widget.resizeCount, resizeCount)
 
         let canvas = NSImage(size: widget.frame.size)
         canvas.lockFocus()
         widget.draw(widget.bounds)
-        widget.update([rows.disk, rows.memory], style: style, showsUnits: true, minimumDigits: 4, indicators: ("RU", full))
+        widget.update([disk, russian, memory, plug])
         widget.draw(widget.bounds)
         canvas.unlockFocus()
 
-        let percentOnly = StatusWidgetBatteryReading(level: 1, isDischarging: false, thresholds: thresholds, showsIcon: false)
-        widget.update([rows.disk, rows.memory], style: style, showsUnits: true, minimumDigits: 4, indicators: ("RU", percentOnly))
+        widget.update([disk, russian, memory, StatusWidgetDisplayCell(text: "100%", widthSample: "100%")])
         XCTAssertGreaterThan(widget.frame.width, width)
-
-        widget.update([rows.disk, rows.memory], style: style, showsUnits: true, minimumDigits: 4, indicators: (nil, nil))
+        widget.update([disk, nil, memory, nil])
         XCTAssertLessThan(widget.frame.width, width)
+    }
+
+    @MainActor
+    func testStatusWidgetHidesEachCellAndCollapsesAnEmptyColumn() {
+        let widget = StackedMenuBarView()
+        let disk = StatusWidgetDisplayCell(text: "43", widthSample: "494")
+        let memory = StatusWidgetDisplayCell(text: "4", widthSample: "18")
+        let keyboard = StatusWidgetDisplayCell(text: "EN", widthSample: "ABC")
+        let battery = StatusWidgetDisplayCell(text: "100%", widthSample: "100%")
+        widget.update([disk, keyboard, memory, battery])
+        let fullWidth = widget.frame.width
+        widget.update([nil, keyboard, memory, battery])
+        XCTAssertGreaterThan(widget.frame.width, 0)
+        XCTAssertLessThan(widget.frame.width, fullWidth)
+        widget.update([nil, keyboard, nil, battery])
+        XCTAssertGreaterThan(widget.frame.width, 0)
+        XCTAssertLessThan(widget.frame.width, fullWidth)
+        widget.update([nil, nil, nil, nil])
+        XCTAssertEqual(widget.frame.width, 0)
     }
 
     private final class CountingStackedMenuBarView: StackedMenuBarView {

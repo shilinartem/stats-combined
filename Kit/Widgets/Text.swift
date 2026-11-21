@@ -68,10 +68,16 @@ public enum CompactMenuBar {
 
     private static func formatExpression(for variable: String) -> NSRegularExpression? {
         let token = NSRegularExpression.escapedPattern(for: variable)
-        return try? NSRegularExpression(pattern: "\(token)(?![a-zA-Z0-9_])(?:\\[(0{1,6})(?:\\.(0{1,3}))?\\]|(?!\\[))")
+        return try? NSRegularExpression(pattern: "\(token)(?![a-zA-Z0-9_])(?:\\[(?=[0.])(0{0,6})(?:\\.(0{1,3}))?\\]|(?!\\[))")
     }
 
-    private static func render(_ template: String, expression: NSRegularExpression?, bytes: Int64, format: (unit: Int64, digits: Int), tone: Tone) -> Reading? {
+    static func statusStorageText(_ template: String, bytes: Int64?, isMemory: Bool) -> String {
+        let expression = isMemory ? memoryExpression : diskExpression
+        let unit = isMemory ? gibibyte : gigabyte
+        return render(template, expression: expression, bytes: bytes, format: (unit, 0), tone: .normal)?.text ?? template
+    }
+
+    private static func render(_ template: String, expression: NSRegularExpression?, bytes: Int64?, format: (unit: Int64, digits: Int), tone: Tone) -> Reading? {
         guard let expression else { return nil }
         let matches = expression.matches(in: template, range: NSRange(template.startIndex..., in: template))
         guard !matches.isEmpty else { return nil }
@@ -79,9 +85,14 @@ public enum CompactMenuBar {
         let (unit, digits) = format
         let rendered = NSMutableString(string: template)
         for match in matches.reversed() {
-            let width = match.range(at: 1).length > 0 ? match.range(at: 1).length : digits
+            guard let bytes else {
+                rendered.replaceCharacters(in: match.range, with: "–")
+                continue
+            }
+            let padding = match.range(at: 1)
+            let width = padding.location == NSNotFound ? digits : padding.length
             let precision = match.range(at: 2).length
-            let limit = (0..<width).reduce(Int64(0)) { limit, _ in limit * 10 + 9 }
+            let limit = width == 0 ? Int64.max : (0..<width).reduce(Int64(0)) { limit, _ in limit * 10 + 9 }
             let value = max(0, bytes)
             let whole = value / unit
             var number = padded(min(whole, limit), digits: width)

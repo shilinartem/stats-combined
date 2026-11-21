@@ -525,23 +525,58 @@ public enum CombinedModulesWidget: String {
         return current
     }
 
-    public func includes(module: ModuleType, showsBattery: Bool) -> Bool {
-        !self.isDiskRAMStack || module == .disk || module == .RAM || (module == .battery && showsBattery)
+    public func includes(module: ModuleType) -> Bool {
+        !self.isDiskRAMStack || module == .disk || module == .RAM || module == .battery
+    }
+}
+
+public enum StatusWidgetValue {
+    case storage(Int64?)
+    case keyboard(String?)
+    case battery(Int?)
+}
+
+public enum StatusWidgetCell: String, CaseIterable {
+    case disk, keyboard, memory, battery
+
+    public var title: String {
+        switch self {
+        case .disk: return "Disk"
+        case .keyboard: return "Keyboard"
+        case .memory: return "RAM"
+        case .battery: return "Battery"
+        }
     }
 
-    public func stackedReadings(
-        diskFreeBytes: Int64?, memoryFreeBytes: Int64?, showsUnits: Bool? = nil,
-        diskThresholds: StatusWidgetThresholds = StatusWidgetMetric.disk.defaultThresholds,
-        memoryThresholds: StatusWidgetThresholds = StatusWidgetMetric.memory.defaultThresholds
-    ) -> (disk: CompactMenuBar.Reading, memory: CompactMenuBar.Reading)? {
-        guard self.isDiskRAMStack else { return nil }
-        let units = (showsUnits ?? (self != .diskRAMNumbers)) ? " GB" : ""
-        let diskLabel = self == .diskRAMLabels ? "SSD " : ""
-        let memoryLabel = self == .diskRAMLabels ? "RAM " : ""
-        return (
-            StatusWidgetMetric.disk.reading(diskFreeBytes.map { Double($0) / 1_000_000_000 }, thresholds: diskThresholds, prefix: diskLabel, suffix: units),
-            StatusWidgetMetric.memory.reading(memoryFreeBytes.map { Double($0) / 1_073_741_824 }, thresholds: memoryThresholds, prefix: memoryLabel, suffix: units)
-        )
+    public var metric: StatusWidgetMetric? { StatusWidgetMetric(rawValue: self.rawValue) }
+
+    public func defaultFormat(for layout: CombinedModulesWidget) -> String {
+        switch self {
+        case .disk: return (layout == .diskRAMLabels ? "SSD " : "") + "$capacity.free$unit"
+        case .memory: return (layout == .diskRAMLabels ? "RAM " : "") + "$mem.free$unit"
+        case .keyboard: return "$layout"
+        case .battery: return "$battery.level"
+        }
+    }
+
+    public func render(_ template: String, value: StatusWidgetValue, showsUnits: Bool = false) -> String {
+        switch (self, value) {
+        case (.disk, .storage(let bytes)), (.memory, .storage(let bytes)):
+            let text = CompactMenuBar.statusStorageText(template, bytes: bytes, isMemory: self == .memory)
+            return Self.substitute("$unit", with: showsUnits ? " GB" : "", in: text)
+        case (.keyboard, .keyboard(let layout)):
+            return Self.substitute("$layout", with: layout ?? "–", in: template)
+        case (.battery, .battery(let percentage)):
+            let amount = percentage.map(String.init) ?? "–"
+            let level = Self.substitute("$battery.level", with: amount + "%", in: template)
+            return Self.substitute("$battery.percent", with: amount, in: level)
+        default: return template
+        }
+    }
+
+    private static func substitute(_ token: String, with value: String, in template: String) -> String {
+        let pattern = NSRegularExpression.escapedPattern(for: token) + "(?![a-zA-Z0-9_.])"
+        return template.replacingOccurrences(of: pattern, with: NSRegularExpression.escapedTemplate(for: value), options: .regularExpression)
     }
 }
 
@@ -605,12 +640,6 @@ public struct StatusWidgetBatteryReading: Equatable {
 }
 
 public enum StatusWidgetPreferences {
-    public static let layouts = [
-        KeyValue_t(key: CombinedModulesWidget.diskRAMNumbers.rawValue, value: "Numbers"),
-        KeyValue_t(key: CombinedModulesWidget.diskRAMUnits.rawValue, value: "Numbers with GB"),
-        KeyValue_t(key: CombinedModulesWidget.diskRAMLabels.rawValue, value: "SSD / RAM labels")
-    ]
-
     public static var enabled: Bool {
         get { Store.shared.bool(key: "StatusWidget_enabled", defaultValue: false) }
         set { Store.shared.set(key: "StatusWidget_enabled", value: newValue) }
@@ -625,19 +654,33 @@ public enum StatusWidgetPreferences {
         set { Store.shared.set(key: "StatusWidget_layout", value: newValue.rawValue) }
     }
 
-    public static var showsUnits: Bool {
+    private static var legacyShowsUnits: Bool {
         get { Store.shared.bool(key: "StatusWidget_units", defaultValue: layout != .diskRAMNumbers) }
         set { Store.shared.set(key: "StatusWidget_units", value: newValue) }
     }
 
-    public static var showsKeyboard: Bool {
-        get { Store.shared.bool(key: "StatusWidget_keyboard", defaultValue: true) }
-        set { Store.shared.set(key: "StatusWidget_keyboard", value: newValue) }
+    public static func showsUnits(for cell: StatusWidgetCell) -> Bool {
+        Store.shared.bool(key: "StatusWidget_\(cell.rawValue)_units", defaultValue: legacyShowsUnits)
     }
 
-    public static var showsBattery: Bool {
-        get { Store.shared.bool(key: "StatusWidget_battery", defaultValue: true) }
-        set { Store.shared.set(key: "StatusWidget_battery", value: newValue) }
+    public static func setShowsUnits(_ enabled: Bool, for cell: StatusWidgetCell) {
+        Store.shared.set(key: "StatusWidget_\(cell.rawValue)_units", value: enabled)
+    }
+
+    public static func isVisible(_ cell: StatusWidgetCell) -> Bool {
+        Store.shared.bool(key: "StatusWidget_\(cell.rawValue)", defaultValue: true)
+    }
+
+    public static func setVisible(_ enabled: Bool, for cell: StatusWidgetCell) {
+        Store.shared.set(key: "StatusWidget_\(cell.rawValue)", value: enabled)
+    }
+
+    public static func format(for cell: StatusWidgetCell) -> String {
+        Store.shared.string(key: "StatusWidget_\(cell.rawValue)_format", defaultValue: cell.defaultFormat(for: layout))
+    }
+
+    public static func setFormat(_ template: String, for cell: StatusWidgetCell) {
+        Store.shared.set(key: "StatusWidget_\(cell.rawValue)_format", value: template)
     }
 
     public static var showsBatteryIcon: Bool {
@@ -661,8 +704,8 @@ public enum StatusWidgetPreferences {
     public static func migrateCombinedLayout() {
         guard !Store.shared.exist(key: "StatusWidget_enabled"), CombinedModulesWidget.current.isDiskRAMStack else { return }
         layout = CombinedModulesWidget.current
-        showsUnits = layout != .diskRAMNumbers
-        showsKeyboard = Store.shared.bool(key: "CombinedModules_keyboardAndBattery", defaultValue: true)
+        legacyShowsUnits = layout != .diskRAMNumbers
+        setVisible(Store.shared.bool(key: "CombinedModules_keyboardAndBattery", defaultValue: true), for: .keyboard)
         enabled = Store.shared.bool(key: "CombinedModules", defaultValue: false)
         CombinedModulesWidget.current = .widgets
         Store.shared.set(key: "CombinedModules", value: false)

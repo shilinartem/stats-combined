@@ -24,8 +24,8 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
     private let summary: CombinedSummaryWidget = CombinedSummaryWidget()
     private let stacked = StackedMenuBarView()
     private var stackedItemWidth: CGFloat?
-    private var diskDigits = 3
-    private let memoryDigits = String(ProcessInfo.processInfo.physicalMemory / 1_073_741_824).count
+    private var diskCapacity: Int64 = 999_000_000_000
+    private let memoryCapacity = Int64(clamping: ProcessInfo.processInfo.physicalMemory)
     private static let inputSourceChanged = Notification.Name(kTISNotifySelectedKeyboardInputSourceChanged as String)
     
     private var status: Bool {
@@ -41,9 +41,8 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
     
     private var activeModules: [Module] {
         let style = self.display
-        let showsBattery = StatusWidgetPreferences.showsBattery
         return modules.filter {
-            $0.enabled && $0.menuBar.presentationVisible && style.includes(module: $0.moduleType, showsBattery: showsBattery)
+            $0.enabled && $0.menuBar.presentationVisible && style.includes(module: $0.moduleType)
         }.sorted(by: { $0.combinedPosition < $1.combinedPosition })
     }
     
@@ -78,7 +77,7 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
                 let style = self.display
                 if style.isSummaryWidget {
                     self.updateSummary()
-                } else if style.isDiskRAMStack && style.includes(module: module, showsBattery: StatusWidgetPreferences.showsBattery) {
+                } else if style.isDiskRAMStack && style.includes(module: module) {
                     self.updateStackedReadings()
                 }
             }
@@ -119,6 +118,7 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
             self.stackedItemWidth = self.stacked.frame.width
         }
         self.menuBarItem = NSStatusBar.system.statusItem(withLength: self.stackedItemWidth ?? 0)
+        if self.stackedItemWidth == 0 { self.menuBarItem?.isVisible = false }
         DispatchQueue.main.async(execute: {
             self.menuBarItem?.autosaveName = "CombinedModules"
         })
@@ -151,6 +151,7 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
             return
         }
 
+        if self.stackedItemWidth == 0 { self.menuBarItem?.isVisible = true }
         self.stackedItemWidth = nil
         self.view.subviews.forEach({ $0.removeFromSuperview() })
         self.menuBarItem?.button?.toolTip = localizedString("Combined modules")
@@ -188,45 +189,30 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
 
     @objc private func keyboardInputChanged() {
         DispatchQueue.main.async { [weak self] in
-            guard StatusWidgetPreferences.showsKeyboard else { return }
+            guard StatusWidgetPreferences.isVisible(.keyboard) else { return }
             self?.updateStackedReadings()
         }
     }
 
     private func updateStackedReadings() {
         guard self.status else { return }
-        let style = self.display
-        guard style.isDiskRAMStack else { return }
+        guard self.display.isDiskRAMStack else { return }
         let disk = modules.lazy.compactMap { ($0 as? Disk)?.displayedCapacity }.first
         if let capacity = disk?.totalBytes, capacity > 0 {
-            self.diskDigits = String(capacity / 1_000_000_000).count
+            self.diskCapacity = capacity
         }
         let memory = modules.lazy.compactMap { ($0 as? RAM)?.displayedFreeBytes }.first
-        let showsUnits = StatusWidgetPreferences.showsUnits
-        guard let values = style.stackedReadings(
-            diskFreeBytes: disk?.freeBytes, memoryFreeBytes: memory, showsUnits: showsUnits,
-            diskThresholds: StatusWidgetPreferences.thresholds(for: .disk),
-            memoryThresholds: StatusWidgetPreferences.thresholds(for: .memory)
-        ) else { return }
-
-        let keyboard = StatusWidgetPreferences.showsKeyboard ? self.keyboardCode() ?? "–" : nil
-        var battery: StatusWidgetBatteryReading?
-        if StatusWidgetPreferences.showsBattery {
-            let charge = modules.lazy.compactMap { ($0 as? Battery)?.chargeStatus }.first
-            battery = StatusWidgetBatteryReading(
-                level: charge?.level, isDischarging: charge?.isDischarging ?? false,
-                thresholds: StatusWidgetPreferences.thresholds(for: .battery), showsIcon: StatusWidgetPreferences.showsBatteryIcon,
-                isOnACPower: charge?.isOnACPower ?? false
-            )
-        }
+        let cells = [
+            self.storageCell(.disk, bytes: disk?.freeBytes, capacity: self.diskCapacity),
+            self.keyboardCell(),
+            self.storageCell(.memory, bytes: memory, capacity: self.memoryCapacity),
+            self.batteryCell()
+        ]
         if self.stacked.superview !== self.view {
             self.view.subviews.forEach { $0.removeFromSuperview() }
             self.view.addSubview(self.stacked)
         }
-        self.stacked.update(
-            [values.disk, values.memory], style: style, showsUnits: showsUnits,
-            minimumDigits: max(3, self.diskDigits, self.memoryDigits), indicators: (keyboard, battery)
-        )
+        self.stacked.update(cells)
         let frameSize = self.stacked.frame.size
         if self.view.frame.size != frameSize {
             self.view.setFrameSize(frameSize)
@@ -235,15 +221,56 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
         if self.stackedItemWidth != frameSize.width {
             self.stackedItemWidth = frameSize.width
             item.length = frameSize.width
+            if item.isVisible != (frameSize.width > 0) { item.isVisible = frameSize.width > 0 }
         }
 
-        var description = "\(localizedString("Disk")): \(values.disk.text), \(localizedString("RAM")): \(values.memory.text)"
-        if let keyboard { description += ", \(localizedString("Keyboard")): \(keyboard)" }
-        if let battery { description += ", \(localizedString("Battery")): \(battery.label.text)" }
+        let description = zip(StatusWidgetCell.allCases, cells).compactMap { cell, content -> String? in
+            guard let content else { return nil }
+            return "\(localizedString(cell.title)): \(content.tooltip ?? content.text)"
+        }.joined(separator: ", ")
         if item.button?.toolTip != description {
             item.button?.toolTip = description
             item.button?.setAccessibilityLabel(description)
         }
+    }
+
+    private func storageCell(_ cell: StatusWidgetCell, bytes: Int64?, capacity: Int64) -> StatusWidgetDisplayCell? {
+        guard StatusWidgetPreferences.isVisible(cell), let metric = cell.metric else { return nil }
+        let template = StatusWidgetPreferences.format(for: cell)
+        let showsUnits = StatusWidgetPreferences.showsUnits(for: cell)
+        let scale = cell == .disk ? 1_000_000_000.0 : 1_073_741_824.0
+        let reading = metric.reading(bytes.map { Double($0) / scale }, thresholds: StatusWidgetPreferences.thresholds(for: metric))
+        let text = cell.render(template, value: .storage(bytes), showsUnits: showsUnits)
+        return StatusWidgetDisplayCell(
+            text: text, widthSample: cell.render(template, value: .storage(capacity), showsUnits: showsUnits), tone: reading.tone,
+            alignment: template.hasPrefix("$") ? .right : .left
+        )
+    }
+
+    private func keyboardCell() -> StatusWidgetDisplayCell? {
+        let cell = StatusWidgetCell.keyboard
+        guard StatusWidgetPreferences.isVisible(cell) else { return nil }
+        let template = StatusWidgetPreferences.format(for: cell)
+        return StatusWidgetDisplayCell(
+            text: cell.render(template, value: .keyboard(self.keyboardCode())), widthSample: cell.render(template, value: .keyboard("ABC"))
+        )
+    }
+
+    private func batteryCell() -> StatusWidgetDisplayCell? {
+        let cell = StatusWidgetCell.battery
+        guard StatusWidgetPreferences.isVisible(cell) else { return nil }
+        let charge = modules.lazy.compactMap { ($0 as? Battery)?.chargeStatus }.first
+        let battery = StatusWidgetBatteryReading(
+            level: charge?.level, isDischarging: charge?.isDischarging ?? false,
+            thresholds: StatusWidgetPreferences.thresholds(for: .battery), showsIcon: StatusWidgetPreferences.showsBatteryIcon,
+            isOnACPower: charge?.isOnACPower ?? false
+        )
+        let template = StatusWidgetPreferences.format(for: cell)
+        let percentage = battery.level.map { Int(($0 * 100).rounded()) }
+        return StatusWidgetDisplayCell(
+            text: cell.render(template, value: .battery(percentage)), widthSample: cell.render(template, value: .battery(100)),
+            tone: battery.label.tone, batteryIcon: battery.showsIcon ? battery : nil, tooltip: battery.label.text
+        )
     }
 
     private func keyboardCode() -> String? {
@@ -383,45 +410,39 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
     }
 }
 
+internal struct StatusWidgetDisplayCell: Equatable {
+    let text: String
+    let widthSample: String
+    var tone: CompactMenuBar.Tone = .normal
+    var alignment: NSTextAlignment = .center
+    var batteryIcon: StatusWidgetBatteryReading?
+    var tooltip: String?
+}
+
 internal class StackedMenuBarView: NSView {
     private let font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
     private let inset: CGFloat = 3
     private let gap: CGFloat = 8
     private let batteryIconWidth: CGFloat = 17
     private let menuBarHeight = Constants.Widget.height
-    private var readings: [CompactMenuBar.Reading] = []
-    private var alignLabels = false
-    private var keyboard: String?
-    private var battery: StatusWidgetBatteryReading?
-    private var readingsWidth: CGFloat = 0
-    private var auxiliaryWidth: CGFloat = 0
+    private var cells: [StatusWidgetDisplayCell?] = []
+    private var columns: [CGFloat] = [0, 0]
 
     override var isFlipped: Bool { true }
 
-    private var batteryTextWidth: CGFloat { self.text("100%").size().width }
-
-    func update(
-        _ readings: [CompactMenuBar.Reading], style: CombinedModulesWidget, showsUnits: Bool, minimumDigits: Int = 3,
-        indicators: (keyboard: String?, battery: StatusWidgetBatteryReading?)
-    ) {
-        let (keyboard, battery) = indicators
-        let alignLabels = style == .diskRAMLabels
-        let templateLength = minimumDigits + (alignLabels ? 4 : 0) + (showsUnits ? 3 : 0)
-        let readingsWidth = ceil(self.text(String(repeating: "0", count: templateLength)).size().width)
-        let keyboardWidth = keyboard == nil ? 0 : self.text("000").size().width
-        let batteryWidth = battery.map { $0.showsIcon ? self.batteryIconWidth : self.batteryTextWidth } ?? 0
-        let auxiliaryWidth = ceil(max(keyboardWidth, batteryWidth))
-        let auxiliarySpace = auxiliaryWidth > 0 ? self.gap + auxiliaryWidth : 0
-        let size = NSSize(width: readingsWidth + auxiliarySpace + 2 * self.inset, height: self.menuBarHeight)
-
-        guard self.readings != readings || self.alignLabels != alignLabels || self.keyboard != keyboard || self.battery != battery
-                || self.readingsWidth != readingsWidth || self.auxiliaryWidth != auxiliaryWidth || self.frame.size != size else { return }
-        self.readings = readings
-        self.alignLabels = alignLabels
-        self.keyboard = keyboard
-        self.battery = battery
-        self.readingsWidth = readingsWidth
-        self.auxiliaryWidth = auxiliaryWidth
+    func update(_ cells: [StatusWidgetDisplayCell?]) {
+        guard self.cells != cells else { return }
+        var columns: [CGFloat] = [0, 0]
+        for (index, content) in cells.enumerated() {
+            guard let content else { continue }
+            let width = content.batteryIcon == nil ? ceil(self.text(content.widthSample).size().width) : self.batteryIconWidth
+            columns[index % 2] = max(columns[index % 2], width)
+        }
+        let activeColumns = columns.filter { $0 > 0 }
+        let width = activeColumns.isEmpty ? 0 : activeColumns.reduce(0, +) + 2 * self.inset + (activeColumns.count == 2 ? self.gap : 0)
+        let size = NSSize(width: width, height: self.menuBarHeight)
+        self.cells = cells
+        self.columns = columns
         if self.frame.size != size { self.setFrameSize(size) }
         self.needsDisplay = true
     }
@@ -429,25 +450,21 @@ internal class StackedMenuBarView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         let height = self.bounds.height / 2
-        for (row, reading) in self.readings.enumerated() {
-            let rect = NSRect(x: self.inset, y: CGFloat(row) * height, width: self.readingsWidth, height: height)
-            self.draw(self.text(reading.text, color: reading.tone.color(dark: self.isDarkMode)), in: rect, alignment: self.alignLabels ? .left : .right)
-        }
-        let x = self.inset + self.readingsWidth + self.gap
-        if let keyboard = self.keyboard {
-            self.draw(self.text(keyboard), in: NSRect(x: x, y: 0, width: self.auxiliaryWidth, height: height), alignment: .center)
-        }
-        if let battery = self.battery {
-            self.drawBattery(battery, in: NSRect(x: x, y: height, width: self.auxiliaryWidth, height: height))
+        for (index, content) in self.cells.enumerated() {
+            guard let content else { continue }
+            let column = index % 2
+            let x = self.inset + (column == 1 && self.columns[0] > 0 ? self.columns[0] + self.gap : 0)
+            let rect = NSRect(x: x, y: CGFloat(index / 2) * height, width: self.columns[column], height: height)
+            if let battery = content.batteryIcon {
+                self.drawBattery(battery, in: rect)
+            } else {
+                self.draw(self.text(content.text, color: content.tone.color(dark: self.isDarkMode)), in: rect, alignment: content.alignment)
+            }
         }
     }
 
     private func drawBattery(_ battery: StatusWidgetBatteryReading, in rect: NSRect) {
         let color = battery.label.tone.color(dark: self.isDarkMode)
-        guard battery.showsIcon else {
-            self.draw(self.text(battery.label.text, color: color), in: rect, alignment: .center)
-            return
-        }
         if battery.showsPowerPlug && self.drawPowerPlug(in: rect, color: color) { return }
 
         let left = (rect.midX - self.batteryIconWidth / 2).rounded()

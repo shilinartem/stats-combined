@@ -7,6 +7,19 @@
 
 macOS system monitor in your menu bar
 
+## Status Widget
+
+Open **Status Widget** in the settings sidebar to configure Disk, Keyboard, RAM, and Battery independently. Each card has a visibility switch and a text format. Disk and RAM also have a GB switch, and Battery can show a charge icon or a power plug when connected.
+
+| Cell | Example format |
+| --- | --- |
+| Disk | `SSD $capacity.free$unit` |
+| Keyboard | `[$layout]` |
+| RAM | `$mem.free[.0]$unit` |
+| Battery | `$battery.level` |
+
+`[.0]` shows one decimal without leading zeroes. `$unit` shows GB when enabled for the cell. Each numeric cell has its own alert thresholds.
+
 ## Installation
 ### Manual
 You can download the latest version [here](https://github.com/exelban/stats/releases/latest/download/Stats.dmg).
