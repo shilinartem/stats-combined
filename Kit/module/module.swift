@@ -135,7 +135,7 @@ open class Module {
         self.popupView = popup
         self.notificationsView = notifications
         self.previewView = preview
-        self.menuBar = MenuBar(moduleName: self.config.name)
+        self.menuBar = MenuBar(moduleName: self.config.name, moduleType: moduleType)
         self.available = self.isAvailable()
         self.enabled = Store.shared.bool(key: "\(self.config.name)_state", defaultValue: self.config.defaultState)
         self.userDefaults?.set(self.enabled, forKey: "\(self.config.name)_state")

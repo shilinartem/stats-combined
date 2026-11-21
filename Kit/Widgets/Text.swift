@@ -40,6 +40,18 @@ public enum CompactMenuBar {
         public let tone: Tone
     }
 
+    public enum KeyboardLanguage {
+        case russian, english
+
+        public init?(languageTag: String) {
+            switch languageTag.lowercased().split(separator: "-").first {
+            case "ru": self = .russian
+            case "en": self = .english
+            default: return nil
+            }
+        }
+    }
+
     public static func disk(freeBytes: Int64, template: String = "$capacity.free") -> Reading? {
         let tone: Tone
         switch freeBytes {
@@ -96,6 +108,11 @@ public enum CompactMenuBar {
 
     public static func showsBattery(level: Double, onBatteryPower: Bool, isCharging: Bool) -> Bool {
         onBatteryPower && !isCharging && (0..<0.5).contains(level)
+    }
+
+    public static func batteryPercentage(level: Double) -> String {
+        guard level.isFinite else { return "–" }
+        return "\(Int((min(1, max(0, level)) * 100).rounded()))%"
     }
 }
 

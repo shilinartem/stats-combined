@@ -72,6 +72,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             Store.shared.set(key: "RAM_textWidgetValue", value: CompactMenuBar.defaultMemoryTemplate)
             Store.shared.set(key: "RAM_updateInterval", value: 30)
             Store.shared.set(key: "Battery_state", value: true)
+            Store.shared.set(key: "Battery_widget", value: "text")
+            Store.shared.set(key: "Battery_textWidgetValue", value: "$battery.level")
             Store.shared.set(key: "update-interval", value: AppUpdateInterval.never.rawValue)
             Store.shared.set(key: "setupProcess", value: true)
         }

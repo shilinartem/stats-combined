@@ -334,6 +334,11 @@ public class Disk: Module {
         }
     }
     
+    public var displayedFreeBytes: Int64? {
+        guard self.enabled, let disks = self.capacityReader?.value else { return nil }
+        return self.displayedDrive(in: disks)?.free
+    }
+
     private func displayedDrive(in disks: Disks) -> drive? {
         disks.first(where: { $0.mediaName == self.selectedDisk }) ?? disks.first(where: { $0.root })
     }

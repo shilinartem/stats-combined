@@ -135,6 +135,11 @@ public class Battery: Module {
         let sources = IOPSCopyPowerSourcesList(snapshot).takeRetainedValue() as Array
         return !sources.isEmpty
     }
+
+    public var visibleBatteryPercentage: String? {
+        guard self.enabled, self.menuBar.presentationVisible, let value = self.usageReader?.value else { return nil }
+        return CompactMenuBar.batteryPercentage(level: value.level)
+    }
     
     private func usageCallback(_ raw: Battery_Usage?) {
         guard let value = raw, self.enabled else { return }
@@ -181,7 +186,7 @@ public class Battery: Module {
                     switch pair.key {
                     case "$battery":
                         switch pair.value {
-                        case "level": replacement = "\(Int(abs(value.level) * 100))%"
+                        case "level": replacement = CompactMenuBar.batteryPercentage(level: value.level)
                         case "power": replacement = "\(abs(value.batteryPower).roundTo(decimalPlaces: 2)) W"
                         case "current": replacement = "\(value.current) mA"
                         case "voltage": replacement = "\(value.voltage.roundTo(decimalPlaces: 2)) V"

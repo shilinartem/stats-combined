@@ -385,12 +385,14 @@ public class MenuBar {
     public var callback: (() -> Void)? = nil
     public var widgets: [SWidget] = []
     
-    private var moduleName: String
+    private let moduleName: String
+    private let moduleType: ModuleType
     private var menuBarItem: NSStatusItem? = nil
     private var queue: DispatchQueue
     
     private var combinedModules: Bool {
-        Store.shared.bool(key: "CombinedModules", defaultValue: false)
+        Store.shared.bool(key: "CombinedModules", defaultValue: false) &&
+            CombinedModulesWidget.current.includes(module: self.moduleType, keyboardAndBattery: CombinedModulesWidget.keyboardAndBattery)
     }
     
     public var view: MenuBarView = MenuBarView()
@@ -419,8 +421,9 @@ public class MenuBar {
         self.queue.sync { self._presentationVisible }
     }
     
-    init(moduleName: String) {
+    init(moduleName: String, moduleType: ModuleType) {
         self.moduleName = moduleName
+        self.moduleType = moduleType
         self.queue = DispatchQueue(label: "eu.exelban.Stats.MenuBar.\(moduleName)")
         self.oneView = Store.shared.bool(key: "\(self.moduleName)_oneView", defaultValue: self.oneView)
         self.view.identifier = NSUserInterfaceItemIdentifier(rawValue: moduleName)

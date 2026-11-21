@@ -493,6 +493,9 @@ public enum CombinedModulesWidget: String {
     case bars
     case rings
     case dial
+    case diskRAMNumbers
+    case diskRAMUnits
+    case diskRAMLabels
     
     public static var all: [KeyValue_t] {
         [
@@ -500,7 +503,10 @@ public enum CombinedModulesWidget: String {
             KeyValue_t(key: Self.icon.rawValue, value: "App icon"),
             KeyValue_t(key: Self.bars.rawValue, value: "Mini bars"),
             KeyValue_t(key: Self.rings.rawValue, value: "Concentric rings"),
-            KeyValue_t(key: Self.dial.rawValue, value: "Arc dial")
+            KeyValue_t(key: Self.dial.rawValue, value: "Arc dial"),
+            KeyValue_t(key: Self.diskRAMNumbers.rawValue, value: "Disk and RAM: Numbers"),
+            KeyValue_t(key: Self.diskRAMUnits.rawValue, value: "Disk and RAM: Numbers with GB"),
+            KeyValue_t(key: Self.diskRAMLabels.rawValue, value: "Disk and RAM: SSD / RAM labels")
         ]
     }
     
@@ -513,4 +519,28 @@ public enum CombinedModulesWidget: String {
     }
     
     public var isSummaryWidget: Bool { self == .bars || self == .rings || self == .dial }
+
+    public var isDiskRAMStack: Bool { self == .diskRAMNumbers || self == .diskRAMUnits || self == .diskRAMLabels }
+
+    public static var keyboardAndBattery: Bool {
+        get { Store.shared.bool(key: "CombinedModules_keyboardAndBattery", defaultValue: false) }
+        set { Store.shared.set(key: "CombinedModules_keyboardAndBattery", value: newValue) }
+    }
+
+    public func includes(module: ModuleType, keyboardAndBattery: Bool) -> Bool {
+        !self.isDiskRAMStack || module == .disk || module == .RAM || (module == .battery && keyboardAndBattery)
+    }
+
+    public func stackedReadings(diskFreeBytes: Int64?, memoryFreeBytes: Int64?) -> (disk: CompactMenuBar.Reading, memory: CompactMenuBar.Reading)? {
+        guard self.isDiskRAMStack else { return nil }
+        let units = self == .diskRAMNumbers ? "" : " GB"
+        let diskLabel = self == .diskRAMLabels ? "SSD " : ""
+        let memoryLabel = self == .diskRAMLabels ? "RAM " : ""
+        let disk = diskFreeBytes.flatMap { CompactMenuBar.disk(freeBytes: $0, template: diskLabel + "$capacity.free" + units) }
+        let memory = memoryFreeBytes.flatMap { CompactMenuBar.memory(freeBytes: $0, template: memoryLabel + "$mem.free" + units) }
+        return (
+            disk ?? CompactMenuBar.Reading(text: diskLabel + "---" + units, tone: .normal),
+            memory ?? CompactMenuBar.Reading(text: memoryLabel + "--" + units, tone: .normal)
+        )
+    }
 }

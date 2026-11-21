@@ -215,6 +215,11 @@ public class RAM: Module {
         }
     }
 
+    public var displayedFreeBytes: Int64? {
+        guard self.enabled, let free = self.usageReader?.value?.free else { return nil }
+        return Int64(free)
+    }
+
     private func renderText(_ widget: TextWidget, usage value: RAM_Usage) {
         let template = self.textValue
         let reading = CompactMenuBar.memory(freeBytes: Int64(value.free), template: template)

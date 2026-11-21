@@ -10,7 +10,11 @@
 //
 
 import Cocoa
+import Carbon
 import Kit
+import Disk
+import RAM
+import Battery
 
 internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
     private var menuBarItem: NSStatusItem? = nil
@@ -18,6 +22,8 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
     private var popup: PopupWindow? = nil
     private var clickMonitor: Any? = nil
     private let summary: CombinedSummaryWidget = CombinedSummaryWidget()
+    private let stacked = StackedMenuBarView()
+    private static let inputSourceChanged = Notification.Name(kTISNotifySelectedKeyboardInputSourceChanged as String)
     
     private var status: Bool {
         Store.shared.bool(key: "CombinedModules", defaultValue: false) && !Store.shared.bool(key: "pause", defaultValue: false)
@@ -30,7 +36,11 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
     }
     
     private var activeModules: [Module] {
-        modules.filter({ $0.enabled && $0.menuBar.presentationVisible }).sorted(by: { $0.combinedPosition < $1.combinedPosition })
+        let style = CombinedModulesWidget.current
+        let auxiliary = CombinedModulesWidget.keyboardAndBattery
+        return modules.filter {
+            $0.enabled && $0.menuBar.presentationVisible && style.includes(module: $0.moduleType, keyboardAndBattery: auxiliary)
+        }.sorted(by: { $0.combinedPosition < $1.combinedPosition })
     }
     
     private var combinedModulesPopup: Bool {
@@ -60,8 +70,13 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
             m.summaryCallback = { [weak self] module, value in
                 guard let self else { return }
                 self.summary.setValue(for: module, with: value)
-                guard self.status, CombinedModulesWidget.current.isSummaryWidget else { return }
-                self.updateSummary()
+                guard self.status else { return }
+                let style = CombinedModulesWidget.current
+                if style.isSummaryWidget {
+                    self.updateSummary()
+                } else if style.isDiskRAMStack && style.includes(module: module, keyboardAndBattery: CombinedModulesWidget.keyboardAndBattery) {
+                    self.updateStackedReadings()
+                }
             }
         }
         
@@ -79,6 +94,7 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(listenForStateChange), name: .toggleOneView, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(listenForStateChange), name: .pause, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(listenForModuleRearrrange), name: .moduleRearrange, object: nil)
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(keyboardInputChanged), name: Self.inputSourceChanged, object: nil)
     }
     
     deinit {
@@ -88,6 +104,7 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
         NotificationCenter.default.removeObserver(self, name: .toggleOneView, object: nil)
         NotificationCenter.default.removeObserver(self, name: .pause, object: nil)
         NotificationCenter.default.removeObserver(self, name: .moduleRearrange, object: nil)
+        DistributedNotificationCenter.default().removeObserver(self, name: Self.inputSourceChanged, object: nil)
     }
     
     public func enable() {
@@ -123,6 +140,11 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
         self.view.subviews.forEach({ $0.removeFromSuperview() })
         self.menuBarItem?.button?.toolTip = localizedString("Combined modules")
         self.menuBarItem?.button?.setAccessibilityLabel(localizedString("Combined modules"))
+
+        if CombinedModulesWidget.current.isDiskRAMStack {
+            self.updateStackedReadings()
+            return
+        }
         
         if CombinedModulesWidget.current.isSummaryWidget {
             self.updateSummary()
@@ -152,6 +174,57 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
         }
         self.view.setFrameSize(NSSize(width: w, height: self.view.frame.height))
         self.menuBarItem?.length = w
+    }
+
+    @objc private func keyboardInputChanged() {
+        DispatchQueue.main.async { [weak self] in
+            guard CombinedModulesWidget.keyboardAndBattery else { return }
+            self?.updateStackedReadings()
+        }
+    }
+
+    private func updateStackedReadings() {
+        guard self.status, let item = self.menuBarItem else { return }
+        let style = CombinedModulesWidget.current
+        guard style.isDiskRAMStack else { return }
+        let disk = modules.lazy.compactMap { ($0 as? Disk)?.displayedFreeBytes }.first
+        let memory = modules.lazy.compactMap { ($0 as? RAM)?.displayedFreeBytes }.first
+        guard let values = style.stackedReadings(diskFreeBytes: disk, memoryFreeBytes: memory) else { return }
+
+        var auxiliary: (keyboard: CompactMenuBar.KeyboardLanguage?, battery: String?)?
+        if CombinedModulesWidget.keyboardAndBattery {
+            let battery = modules.lazy.compactMap { ($0 as? Battery)?.visibleBatteryPercentage }.first
+            auxiliary = (self.keyboardLanguage(), battery)
+        }
+        if self.stacked.superview == nil {
+            self.view.addSubview(self.stacked)
+        }
+        self.stacked.update([values.disk, values.memory], alignLabels: style == .diskRAMLabels, auxiliary: auxiliary)
+        self.view.setFrameSize(self.stacked.frame.size)
+        if item.length != self.stacked.frame.width {
+            item.length = self.stacked.frame.width
+        }
+
+        var description = "\(localizedString("Disk")): \(values.disk.text), \(localizedString("RAM")): \(values.memory.text)"
+        if let auxiliary {
+            let language = auxiliary.keyboard.map { $0 == .russian ? "RU" : "EN" } ?? "RU | EN"
+            description += ", \(localizedString("Keyboard")): \(language)"
+            if let battery = auxiliary.battery { description += ", \(localizedString("Battery")): \(battery)" }
+        }
+        item.button?.toolTip = description
+        item.button?.setAccessibilityLabel(description)
+    }
+
+    private func keyboardLanguage() -> CompactMenuBar.KeyboardLanguage? {
+        guard let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue() else { return nil }
+        if let property = TISGetInputSourceProperty(source, kTISPropertyLocalizedName) {
+            let name = (Unmanaged<CFString>.fromOpaque(property).takeUnretainedValue() as String).lowercased()
+            if name.contains("russian") || name.contains("рус") { return .russian }
+        }
+        guard let property = TISGetInputSourceProperty(source, kTISPropertyInputSourceLanguages),
+              let languages = Unmanaged<CFArray>.fromOpaque(property).takeUnretainedValue() as? [String],
+              let language = languages.first else { return nil }
+        return CompactMenuBar.KeyboardLanguage(languageTag: language)
     }
     
     private func updateSummary() {
@@ -276,6 +349,71 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
     
     @objc private func listenForModuleRearrrange() {
         self.recalculate()
+    }
+}
+
+internal class StackedMenuBarView: NSView {
+    private let font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+    private let activeFont = NSFont.monospacedSystemFont(ofSize: 10, weight: .bold)
+    private let inset: CGFloat = 3
+    private let gap: CGFloat = 8
+    private var readings: [CompactMenuBar.Reading] = []
+    private var alignLabels = false
+    private var auxiliary: (keyboard: CompactMenuBar.KeyboardLanguage?, battery: String?)?
+    private var readingsWidth: CGFloat = 0
+    private var keyboardWidth: CGFloat = 0
+
+    override var isFlipped: Bool { true }
+
+    func update(_ readings: [CompactMenuBar.Reading], alignLabels: Bool, auxiliary: (keyboard: CompactMenuBar.KeyboardLanguage?, battery: String?)?) {
+        self.readings = readings
+        self.alignLabels = alignLabels
+        self.auxiliary = auxiliary
+        self.readingsWidth = ceil(readings.map { self.text($0.text).size().width }.max() ?? 0)
+        self.keyboardWidth = auxiliary == nil ? 0 : ceil(self.text("RU | EN", font: self.activeFont).size().width)
+        let auxiliarySpace = auxiliary == nil ? 0 : self.gap + self.keyboardWidth
+        self.setFrameSize(NSSize(width: self.readingsWidth + auxiliarySpace + 2 * self.inset, height: Constants.Widget.height))
+        self.needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let height = self.bounds.height / 2
+        for (row, reading) in self.readings.enumerated() {
+            let rect = NSRect(x: self.inset, y: CGFloat(row) * height, width: self.readingsWidth, height: height)
+            self.draw(self.text(reading.text, color: reading.tone.color(dark: self.isDarkMode)), in: rect, alignment: self.alignLabels ? .left : .right)
+        }
+        guard let auxiliary = self.auxiliary else { return }
+        let x = self.inset + self.readingsWidth + self.gap
+        let keyboard = NSMutableAttributedString(attributedString: self.text("RU | EN", color: .secondaryLabelColor))
+        if let language = auxiliary.keyboard {
+            let range = NSRange(location: language == .russian ? 0 : 5, length: 2)
+            keyboard.addAttributes([.font: self.activeFont, .foregroundColor: NSColor.labelColor], range: range)
+        }
+        self.draw(keyboard, in: NSRect(x: x, y: 0, width: self.keyboardWidth, height: height), alignment: .center)
+        if let battery = auxiliary.battery {
+            self.draw(self.text(battery), in: NSRect(x: x, y: height, width: self.keyboardWidth, height: height), alignment: .center)
+        }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        self.needsDisplay = true
+    }
+
+    private func text(_ value: String, font: NSFont? = nil, color: NSColor = .textColor) -> NSAttributedString {
+        NSAttributedString(string: value, attributes: [.font: font ?? self.font, .foregroundColor: color])
+    }
+
+    private func draw(_ text: NSAttributedString, in rect: NSRect, alignment: NSTextAlignment) {
+        let size = text.size()
+        let x: CGFloat
+        switch alignment {
+        case .left: x = rect.minX
+        case .right: x = rect.maxX - size.width
+        default: x = rect.midX - size.width / 2
+        }
+        text.draw(at: NSPoint(x: x.rounded(), y: (rect.midY - size.height / 2).rounded()))
     }
 }
 
