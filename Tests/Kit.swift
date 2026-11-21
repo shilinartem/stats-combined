@@ -84,6 +84,26 @@ class KitTests: XCTestCase {
         XCTAssertEqual(StatusWidgetMetric.memory.reading(5, thresholds: custom).tone, .red)
     }
 
+    func testStatusWidgetBatteryWarningStartsAtFiftyPercent() {
+        let battery = StatusWidgetMetric.battery
+        XCTAssertEqual(battery.reading(51, thresholds: battery.defaultThresholds).tone, .normal)
+        XCTAssertEqual(battery.reading(50, thresholds: battery.defaultThresholds).tone, .yellow)
+    }
+
+    func testStatusWidgetBatteryColorsOnlyWhenDischarging() {
+        let thresholds = StatusWidgetMetric.battery.defaultThresholds
+        let unplugged = StatusWidgetBatteryReading(level: 0.50, isDischarging: true, thresholds: thresholds, showsIcon: true)
+        let pluggedIn = StatusWidgetBatteryReading(level: 0.50, isDischarging: false, thresholds: thresholds, showsIcon: true)
+        XCTAssertEqual(unplugged.label.text, "50%")
+        XCTAssertEqual(unplugged.label.tone, .yellow)
+        XCTAssertEqual(pluggedIn.label.text, "50%")
+        XCTAssertEqual(pluggedIn.label.tone, .normal)
+        XCTAssertEqual(unplugged.level, 0.5)
+        XCTAssertTrue(unplugged.showsIcon)
+        XCTAssertEqual(StatusWidgetBatteryReading(level: 0.15, isDischarging: true, thresholds: thresholds, showsIcon: true).label.tone, .red)
+        XCTAssertEqual(StatusWidgetBatteryReading(level: 0.15, isDischarging: false, thresholds: thresholds, showsIcon: true).label.tone, .normal)
+    }
+
     func testStackedMenuBarMovesBatteryIntoTheOptionalColumnOnly() {
         let style = CombinedModulesWidget.diskRAMUnits
         XCTAssertTrue(style.includes(module: .disk, showsBattery: false))
@@ -99,18 +119,23 @@ class KitTests: XCTestCase {
         let style = CombinedModulesWidget.diskRAMLabels
         let rows = try XCTUnwrap(style.stackedReadings(diskFreeBytes: 143_000_000_000, memoryFreeBytes: 12 * gibibyte))
         let fewerDigits = try XCTUnwrap(style.stackedReadings(diskFreeBytes: 4_000_000_000, memoryFreeBytes: gibibyte))
-        let battery = StatusWidgetMetric.battery
-        let thresholds = battery.defaultThresholds
+        let thresholds = StatusWidgetMetric.battery.defaultThresholds
         let widget = StackedMenuBarView()
-        widget.update([rows.disk, rows.memory], style: style, showsUnits: true, keyboard: "RU", battery: battery.reading(100, thresholds: thresholds, suffix: "%"))
+        let full = StatusWidgetBatteryReading(level: 1, isDischarging: false, thresholds: thresholds, showsIcon: true)
+        widget.update([rows.disk, rows.memory], style: style, showsUnits: true, keyboard: "RU", battery: full)
         let width = widget.frame.width
-        widget.update([fewerDigits.disk, fewerDigits.memory], style: style, showsUnits: true, keyboard: "EN", battery: battery.reading(9, thresholds: thresholds, suffix: "%"))
+        let low = StatusWidgetBatteryReading(level: 0.09, isDischarging: true, thresholds: thresholds, showsIcon: true)
+        widget.update([fewerDigits.disk, fewerDigits.memory], style: style, showsUnits: true, keyboard: "EN", battery: low)
         XCTAssertEqual(widget.frame.width, width)
 
         let canvas = NSImage(size: widget.frame.size)
         canvas.lockFocus()
         widget.draw(widget.bounds)
         canvas.unlockFocus()
+
+        let percentOnly = StatusWidgetBatteryReading(level: 1, isDischarging: false, thresholds: thresholds, showsIcon: false)
+        widget.update([rows.disk, rows.memory], style: style, showsUnits: true, keyboard: "RU", battery: percentOnly)
+        XCTAssertLessThan(widget.frame.width, width)
 
         widget.update([rows.disk, rows.memory], style: style, showsUnits: true, keyboard: nil, battery: nil)
         XCTAssertLessThan(widget.frame.width, width)

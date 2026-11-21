@@ -5,6 +5,7 @@ final class StatusWidgetSettings: NSStackView, NSTextFieldDelegate {
     static let title = "Status Widget"
     private var format: NSPopUpButton?
     private var units: NSSwitch?
+    private var batteryIcon: NSSwitch?
 
     init() {
         super.init(frame: NSRect(x: 0, y: 0, width: Constants.Settings.width, height: Constants.Settings.height))
@@ -19,12 +20,16 @@ final class StatusWidgetSettings: NSStackView, NSTextFieldDelegate {
         let units = self.switchView(action: #selector(changeUnits), state: StatusWidgetPreferences.showsUnits)
         self.format = format
         self.units = units
+        let batteryIcon = self.switchView(action: #selector(changeBatteryIcon), state: StatusWidgetPreferences.showsBatteryIcon)
+        batteryIcon.isEnabled = StatusWidgetPreferences.showsBattery
+        self.batteryIcon = batteryIcon
         scroll.stackView.addArrangedSubview(PreferencesSection(title: "Display", [
             PreferencesRow("Show in menu bar", component: self.switchView(action: #selector(changeEnabled), state: StatusWidgetPreferences.enabled)),
             PreferencesRow("Format", component: format),
             PreferencesRow("Show GB", component: units),
             PreferencesRow("Current keyboard layout", component: self.switchView(action: #selector(changeKeyboard), state: StatusWidgetPreferences.showsKeyboard)),
-            PreferencesRow("Battery percentage", component: self.switchView(action: #selector(changeBattery), state: StatusWidgetPreferences.showsBattery))
+            PreferencesRow("Battery percentage", component: self.switchView(action: #selector(changeBattery), state: StatusWidgetPreferences.showsBattery)),
+            PreferencesRow("Battery icon", component: batteryIcon)
         ]))
         scroll.stackView.addArrangedSubview(self.thresholdSection("Disk (GB)", metric: .disk, warning: "Yellow below", critical: "Red below"))
         scroll.stackView.addArrangedSubview(self.thresholdSection("RAM (GiB)", metric: .memory, warning: "Orange at or below", critical: "Red at or below"))
@@ -40,7 +45,8 @@ final class StatusWidgetSettings: NSStackView, NSTextFieldDelegate {
         let values = StatusWidgetPreferences.thresholds(for: metric)
         let warningField = self.thresholdField(values.warning, metric: metric, name: "warning", label: "\(title) warning threshold")
         let criticalField = self.thresholdField(values.critical, metric: metric, name: "critical", label: "\(title) critical threshold")
-        return PreferencesSection(title: title, [PreferencesRow(warning, component: warningField), PreferencesRow(critical, component: criticalField)])
+        let subtitle = metric == .battery ? "On battery power" : ""
+        return PreferencesSection(title: title, subtitle: subtitle, [PreferencesRow(warning, component: warningField), PreferencesRow(critical, component: criticalField)])
     }
 
     private func thresholdField(_ value: Int, metric: StatusWidgetMetric, name: String, label: String) -> NSTextField {
@@ -104,7 +110,13 @@ final class StatusWidgetSettings: NSStackView, NSTextFieldDelegate {
 
     @objc private func changeBattery(_ sender: NSSwitch) {
         StatusWidgetPreferences.showsBattery = sender.state == .on
+        self.batteryIcon?.isEnabled = StatusWidgetPreferences.showsBattery
         self.refresh(regroup: true)
+    }
+
+    @objc private func changeBatteryIcon(_ sender: NSSwitch) {
+        StatusWidgetPreferences.showsBatteryIcon = sender.state == .on
+        self.refresh()
     }
 
     private func refresh(regroup: Bool = false) {

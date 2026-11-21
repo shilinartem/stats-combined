@@ -562,7 +562,7 @@ public enum StatusWidgetMetric: String, CaseIterable {
         switch self {
         case .disk: return StatusWidgetThresholds(warning: 40, critical: 15)
         case .memory: return StatusWidgetThresholds(warning: 2, critical: 1)
-        case .battery: return StatusWidgetThresholds(warning: 30, critical: 15)
+        case .battery: return StatusWidgetThresholds(warning: 50, critical: 15)
         }
     }
 
@@ -584,6 +584,21 @@ public enum StatusWidgetMetric: String, CaseIterable {
 
     private func below(_ amount: Double, threshold: Int) -> Bool {
         self == .disk ? amount < Double(threshold) : amount <= Double(threshold)
+    }
+}
+
+public struct StatusWidgetBatteryReading {
+    public let level: Double?
+    public let label: CompactMenuBar.Reading
+    public let showsIcon: Bool
+
+    public init(level: Double?, isDischarging: Bool, thresholds: StatusWidgetThresholds, showsIcon: Bool) {
+        let level = level.flatMap { $0.isFinite ? min(1, max(0, $0)) : nil }
+        let percentage = level.map { ($0 * 100).rounded() }
+        let label = StatusWidgetMetric.battery.reading(percentage, thresholds: thresholds, suffix: "%")
+        self.level = level
+        self.label = isDischarging ? label : CompactMenuBar.Reading(text: label.text, tone: .normal)
+        self.showsIcon = showsIcon
     }
 }
 
@@ -621,6 +636,11 @@ public enum StatusWidgetPreferences {
     public static var showsBattery: Bool {
         get { Store.shared.bool(key: "StatusWidget_battery", defaultValue: true) }
         set { Store.shared.set(key: "StatusWidget_battery", value: newValue) }
+    }
+
+    public static var showsBatteryIcon: Bool {
+        get { Store.shared.bool(key: "StatusWidget_batteryIcon", defaultValue: true) }
+        set { Store.shared.set(key: "StatusWidget_batteryIcon", value: newValue) }
     }
 
     public static func thresholds(for metric: StatusWidgetMetric) -> StatusWidgetThresholds {

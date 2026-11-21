@@ -198,10 +198,13 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
         ) else { return }
 
         let keyboard = StatusWidgetPreferences.showsKeyboard ? self.keyboardCode() ?? "–" : nil
-        var battery: CompactMenuBar.Reading?
+        var battery: StatusWidgetBatteryReading?
         if StatusWidgetPreferences.showsBattery {
-            let percentage = modules.lazy.compactMap { ($0 as? Battery)?.chargeLevel }.first.map { ($0 * 100).rounded() }
-            battery = StatusWidgetMetric.battery.reading(percentage, thresholds: StatusWidgetPreferences.thresholds(for: .battery), suffix: "%")
+            let charge = modules.lazy.compactMap { ($0 as? Battery)?.chargeStatus }.first
+            battery = StatusWidgetBatteryReading(
+                level: charge?.level, isDischarging: charge?.isDischarging ?? false,
+                thresholds: StatusWidgetPreferences.thresholds(for: .battery), showsIcon: StatusWidgetPreferences.showsBatteryIcon
+            )
         }
         if self.stacked.superview == nil {
             self.view.addSubview(self.stacked)
@@ -214,7 +217,7 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
 
         var description = "\(localizedString("Disk")): \(values.disk.text), \(localizedString("RAM")): \(values.memory.text)"
         if let keyboard { description += ", \(localizedString("Keyboard")): \(keyboard)" }
-        if let battery { description += ", \(localizedString("Battery")): \(battery.text)" }
+        if let battery { description += ", \(localizedString("Battery")): \(battery.label.text)" }
         item.button?.toolTip = description
         item.button?.setAccessibilityLabel(description)
     }
@@ -360,16 +363,20 @@ internal class StackedMenuBarView: NSView {
     private let font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
     private let inset: CGFloat = 3
     private let gap: CGFloat = 8
+    private let batteryIconWidth: CGFloat = 17
+    private let batteryIconGap: CGFloat = 3
     private var readings: [CompactMenuBar.Reading] = []
     private var alignLabels = false
     private var keyboard: String?
-    private var battery: CompactMenuBar.Reading?
+    private var battery: StatusWidgetBatteryReading?
     private var readingsWidth: CGFloat = 0
     private var auxiliaryWidth: CGFloat = 0
 
     override var isFlipped: Bool { true }
 
-    func update(_ readings: [CompactMenuBar.Reading], style: CombinedModulesWidget, showsUnits: Bool, keyboard: String?, battery: CompactMenuBar.Reading?) {
+    private var batteryTextWidth: CGFloat { self.text("100%").size().width }
+
+    func update(_ readings: [CompactMenuBar.Reading], style: CombinedModulesWidget, showsUnits: Bool, keyboard: String?, battery: StatusWidgetBatteryReading?) {
         self.readings = readings
         self.alignLabels = style == .diskRAMLabels
         self.keyboard = keyboard
@@ -377,9 +384,10 @@ internal class StackedMenuBarView: NSView {
         let templateLength = 3 + (self.alignLabels ? 4 : 0) + (showsUnits ? 3 : 0)
         let minWidth = self.text(String(repeating: "0", count: templateLength)).size().width
         self.readingsWidth = ceil(max(minWidth, readings.map { self.text($0.text).size().width }.max() ?? 0))
-        let auxiliaryLength = max(keyboard == nil ? 0 : 3, battery == nil ? 0 : 4)
-        self.auxiliaryWidth = ceil(self.text(String(repeating: "0", count: auxiliaryLength)).size().width)
-        let auxiliarySpace = auxiliaryLength > 0 ? self.gap + self.auxiliaryWidth : 0
+        let keyboardWidth = keyboard == nil ? 0 : self.text("000").size().width
+        let batteryWidth = battery.map { self.batteryTextWidth + ($0.showsIcon ? self.batteryIconWidth + self.batteryIconGap : 0) } ?? 0
+        self.auxiliaryWidth = ceil(max(keyboardWidth, batteryWidth))
+        let auxiliarySpace = self.auxiliaryWidth > 0 ? self.gap + self.auxiliaryWidth : 0
         self.setFrameSize(NSSize(width: self.readingsWidth + auxiliarySpace + 2 * self.inset, height: Constants.Widget.height))
         self.needsDisplay = true
     }
@@ -396,9 +404,35 @@ internal class StackedMenuBarView: NSView {
             self.draw(self.text(keyboard), in: NSRect(x: x, y: 0, width: self.auxiliaryWidth, height: height), alignment: .center)
         }
         if let battery = self.battery {
-            let text = self.text(battery.text, color: battery.tone.color(dark: self.isDarkMode))
-            self.draw(text, in: NSRect(x: x, y: height, width: self.auxiliaryWidth, height: height), alignment: .center)
+            self.drawBattery(battery, in: NSRect(x: x, y: height, width: self.auxiliaryWidth, height: height))
         }
+    }
+
+    private func drawBattery(_ battery: StatusWidgetBatteryReading, in rect: NSRect) {
+        let color = battery.label.tone.color(dark: self.isDarkMode)
+        let text = self.text(battery.label.text, color: color)
+        guard battery.showsIcon else {
+            self.draw(text, in: rect, alignment: .center)
+            return
+        }
+
+        let left = rect.minX + ((rect.width - self.batteryTextWidth - self.batteryIconWidth - self.batteryIconGap) / 2).rounded()
+        let y = (rect.midY - 4).rounded()
+        let body = NSRect(x: left + 0.5, y: y + 0.5, width: 14, height: 7)
+        let outline = NSBezierPath(roundedRect: body, xRadius: 2, yRadius: 2)
+        outline.lineWidth = 1
+        color.setStroke()
+        outline.stroke()
+
+        color.setFill()
+        NSBezierPath(roundedRect: NSRect(x: left + 15.5, y: y + 2.5, width: 1.5, height: 3), xRadius: 0.5, yRadius: 0.5).fill()
+        if let level = battery.level, level > 0 {
+            var fill = body.insetBy(dx: 2, dy: 2)
+            fill.size.width *= CGFloat(level)
+            NSBezierPath(roundedRect: fill, xRadius: min(1, fill.width / 2), yRadius: 1).fill()
+        }
+        let percent = NSRect(x: left + self.batteryIconWidth + self.batteryIconGap, y: rect.minY, width: self.batteryTextWidth, height: rect.height)
+        self.draw(text, in: percent, alignment: .right)
     }
 
     override func viewDidChangeEffectiveAppearance() {

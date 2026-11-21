@@ -136,15 +136,19 @@ public class Battery: Module {
         return !sources.isEmpty
     }
 
-    public var chargeLevel: Double? {
-        if self.enabled, let value = self.usageReader?.value, value.available == true { return value.level }
+    public var chargeStatus: (level: Double, isDischarging: Bool)? {
+        if self.enabled, let value = self.usageReader?.value, value.available == true {
+            return (value.level, value.isBatteryPowered && !value.isCharging)
+        }
         guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [CFTypeRef] else { return nil }
         for source in sources {
             guard let details = IOPSGetPowerSourceDescription(snapshot, source)?.takeUnretainedValue() as? [String: Any],
                   details[kIOPSTypeKey] as? String == kIOPSInternalBatteryType,
                   let percent = details[kIOPSCurrentCapacityKey] as? Int else { continue }
-            return Double(min(100, max(0, percent))) / 100
+            let isBatteryPowered = details[kIOPSPowerSourceStateKey] as? String == "Battery Power"
+            let isCharging = details[kIOPSIsChargingKey] as? Bool ?? false
+            return (Double(min(100, max(0, percent))) / 100, isBatteryPowered && !isCharging)
         }
         return nil
     }
