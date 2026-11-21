@@ -334,9 +334,9 @@ public class Disk: Module {
         }
     }
     
-    public var displayedFreeBytes: Int64? {
-        guard self.enabled, let disks = self.capacityReader?.value else { return nil }
-        return self.displayedDrive(in: disks)?.free
+    public var displayedCapacity: (freeBytes: Int64, totalBytes: Int64)? {
+        guard self.enabled, let disks = self.capacityReader?.value, let drive = self.displayedDrive(in: disks) else { return nil }
+        return (drive.free, drive.size)
     }
 
     private func displayedDrive(in disks: Disks) -> drive? {

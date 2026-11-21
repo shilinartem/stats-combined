@@ -23,6 +23,9 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
     private var clickMonitor: Any? = nil
     private let summary: CombinedSummaryWidget = CombinedSummaryWidget()
     private let stacked = StackedMenuBarView()
+    private var stackedItemWidth: CGFloat?
+    private var diskDigits = 3
+    private let memoryDigits = String(ProcessInfo.processInfo.physicalMemory / 1_073_741_824).count
     private static let inputSourceChanged = Notification.Name(kTISNotifySelectedKeyboardInputSourceChanged as String)
     
     private var status: Bool {
@@ -110,8 +113,12 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
     
     public func enable() {
         guard self.menuBarItem == nil else { return }
-        
-        self.menuBarItem = NSStatusBar.system.statusItem(withLength: 0)
+
+        if self.display.isDiskRAMStack {
+            self.updateStackedReadings()
+            self.stackedItemWidth = self.stacked.frame.width
+        }
+        self.menuBarItem = NSStatusBar.system.statusItem(withLength: self.stackedItemWidth ?? 0)
         DispatchQueue.main.async(execute: {
             self.menuBarItem?.autosaveName = "CombinedModules"
         })
@@ -134,18 +141,20 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
             NSStatusBar.system.removeStatusItem(item)
         }
         self.menuBarItem = nil
+        self.stackedItemWidth = nil
     }
     
     private func recalculate() {
         guard self.status, self.menuBarItem != nil else { return }
-        self.view.subviews.forEach({ $0.removeFromSuperview() })
-        self.menuBarItem?.button?.toolTip = localizedString("Combined modules")
-        self.menuBarItem?.button?.setAccessibilityLabel(localizedString("Combined modules"))
-
         if self.display.isDiskRAMStack {
             self.updateStackedReadings()
             return
         }
+
+        self.stackedItemWidth = nil
+        self.view.subviews.forEach({ $0.removeFromSuperview() })
+        self.menuBarItem?.button?.toolTip = localizedString("Combined modules")
+        self.menuBarItem?.button?.setAccessibilityLabel(localizedString("Combined modules"))
         
         if self.display.isSummaryWidget {
             self.updateSummary()
@@ -185,14 +194,17 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
     }
 
     private func updateStackedReadings() {
-        guard self.status, let item = self.menuBarItem else { return }
+        guard self.status else { return }
         let style = self.display
         guard style.isDiskRAMStack else { return }
-        let disk = modules.lazy.compactMap { ($0 as? Disk)?.displayedFreeBytes }.first
+        let disk = modules.lazy.compactMap { ($0 as? Disk)?.displayedCapacity }.first
+        if let capacity = disk?.totalBytes, capacity > 0 {
+            self.diskDigits = String(capacity / 1_000_000_000).count
+        }
         let memory = modules.lazy.compactMap { ($0 as? RAM)?.displayedFreeBytes }.first
         let showsUnits = StatusWidgetPreferences.showsUnits
         guard let values = style.stackedReadings(
-            diskFreeBytes: disk, memoryFreeBytes: memory, showsUnits: showsUnits,
+            diskFreeBytes: disk?.freeBytes, memoryFreeBytes: memory, showsUnits: showsUnits,
             diskThresholds: StatusWidgetPreferences.thresholds(for: .disk),
             memoryThresholds: StatusWidgetPreferences.thresholds(for: .memory)
         ) else { return }
@@ -206,20 +218,31 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
                 thresholds: StatusWidgetPreferences.thresholds(for: .battery), showsIcon: StatusWidgetPreferences.showsBatteryIcon
             )
         }
-        if self.stacked.superview == nil {
+        if self.stacked.superview !== self.view {
+            self.view.subviews.forEach { $0.removeFromSuperview() }
             self.view.addSubview(self.stacked)
         }
-        self.stacked.update([values.disk, values.memory], style: style, showsUnits: showsUnits, keyboard: keyboard, battery: battery)
-        self.view.setFrameSize(self.stacked.frame.size)
-        if item.length != self.stacked.frame.width {
-            item.length = self.stacked.frame.width
+        self.stacked.update(
+            [values.disk, values.memory], style: style, showsUnits: showsUnits,
+            minimumDigits: max(3, self.diskDigits, self.memoryDigits), indicators: (keyboard, battery)
+        )
+        let frameSize = self.stacked.frame.size
+        if self.view.frame.size != frameSize {
+            self.view.setFrameSize(frameSize)
+        }
+        guard let item = self.menuBarItem else { return }
+        if self.stackedItemWidth != frameSize.width {
+            self.stackedItemWidth = frameSize.width
+            item.length = frameSize.width
         }
 
         var description = "\(localizedString("Disk")): \(values.disk.text), \(localizedString("RAM")): \(values.memory.text)"
         if let keyboard { description += ", \(localizedString("Keyboard")): \(keyboard)" }
         if let battery { description += ", \(localizedString("Battery")): \(battery.label.text)" }
-        item.button?.toolTip = description
-        item.button?.setAccessibilityLabel(description)
+        if item.button?.toolTip != description {
+            item.button?.toolTip = description
+            item.button?.setAccessibilityLabel(description)
+        }
     }
 
     private func keyboardCode() -> String? {
@@ -364,7 +387,7 @@ internal class StackedMenuBarView: NSView {
     private let inset: CGFloat = 3
     private let gap: CGFloat = 8
     private let batteryIconWidth: CGFloat = 17
-    private let batteryIconGap: CGFloat = 3
+    private let menuBarHeight = Constants.Widget.height
     private var readings: [CompactMenuBar.Reading] = []
     private var alignLabels = false
     private var keyboard: String?
@@ -376,19 +399,29 @@ internal class StackedMenuBarView: NSView {
 
     private var batteryTextWidth: CGFloat { self.text("100%").size().width }
 
-    func update(_ readings: [CompactMenuBar.Reading], style: CombinedModulesWidget, showsUnits: Bool, keyboard: String?, battery: StatusWidgetBatteryReading?) {
+    func update(
+        _ readings: [CompactMenuBar.Reading], style: CombinedModulesWidget, showsUnits: Bool, minimumDigits: Int = 3,
+        indicators: (keyboard: String?, battery: StatusWidgetBatteryReading?)
+    ) {
+        let (keyboard, battery) = indicators
+        let alignLabels = style == .diskRAMLabels
+        let templateLength = minimumDigits + (alignLabels ? 4 : 0) + (showsUnits ? 3 : 0)
+        let readingsWidth = ceil(self.text(String(repeating: "0", count: templateLength)).size().width)
+        let keyboardWidth = keyboard == nil ? 0 : self.text("000").size().width
+        let batteryWidth = battery.map { $0.showsIcon ? self.batteryIconWidth : self.batteryTextWidth } ?? 0
+        let auxiliaryWidth = ceil(max(keyboardWidth, batteryWidth))
+        let auxiliarySpace = auxiliaryWidth > 0 ? self.gap + auxiliaryWidth : 0
+        let size = NSSize(width: readingsWidth + auxiliarySpace + 2 * self.inset, height: self.menuBarHeight)
+
+        guard self.readings != readings || self.alignLabels != alignLabels || self.keyboard != keyboard || self.battery != battery
+                || self.readingsWidth != readingsWidth || self.auxiliaryWidth != auxiliaryWidth || self.frame.size != size else { return }
         self.readings = readings
-        self.alignLabels = style == .diskRAMLabels
+        self.alignLabels = alignLabels
         self.keyboard = keyboard
         self.battery = battery
-        let templateLength = 3 + (self.alignLabels ? 4 : 0) + (showsUnits ? 3 : 0)
-        let minWidth = self.text(String(repeating: "0", count: templateLength)).size().width
-        self.readingsWidth = ceil(max(minWidth, readings.map { self.text($0.text).size().width }.max() ?? 0))
-        let keyboardWidth = keyboard == nil ? 0 : self.text("000").size().width
-        let batteryWidth = battery.map { self.batteryTextWidth + ($0.showsIcon ? self.batteryIconWidth + self.batteryIconGap : 0) } ?? 0
-        self.auxiliaryWidth = ceil(max(keyboardWidth, batteryWidth))
-        let auxiliarySpace = self.auxiliaryWidth > 0 ? self.gap + self.auxiliaryWidth : 0
-        self.setFrameSize(NSSize(width: self.readingsWidth + auxiliarySpace + 2 * self.inset, height: Constants.Widget.height))
+        self.readingsWidth = readingsWidth
+        self.auxiliaryWidth = auxiliaryWidth
+        if self.frame.size != size { self.setFrameSize(size) }
         self.needsDisplay = true
     }
 
@@ -410,13 +443,12 @@ internal class StackedMenuBarView: NSView {
 
     private func drawBattery(_ battery: StatusWidgetBatteryReading, in rect: NSRect) {
         let color = battery.label.tone.color(dark: self.isDarkMode)
-        let text = self.text(battery.label.text, color: color)
         guard battery.showsIcon else {
-            self.draw(text, in: rect, alignment: .center)
+            self.draw(self.text(battery.label.text, color: color), in: rect, alignment: .center)
             return
         }
 
-        let left = rect.minX + ((rect.width - self.batteryTextWidth - self.batteryIconWidth - self.batteryIconGap) / 2).rounded()
+        let left = (rect.midX - self.batteryIconWidth / 2).rounded()
         let y = (rect.midY - 4).rounded()
         let body = NSRect(x: left + 0.5, y: y + 0.5, width: 14, height: 7)
         let outline = NSBezierPath(roundedRect: body, xRadius: 2, yRadius: 2)
@@ -431,8 +463,6 @@ internal class StackedMenuBarView: NSView {
             fill.size.width *= CGFloat(level)
             NSBezierPath(roundedRect: fill, xRadius: min(1, fill.width / 2), yRadius: 1).fill()
         }
-        let percent = NSRect(x: left + self.batteryIconWidth + self.batteryIconGap, y: rect.minY, width: self.batteryTextWidth, height: rect.height)
-        self.draw(text, in: percent, alignment: .right)
     }
 
     override func viewDidChangeEffectiveAppearance() {

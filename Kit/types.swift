@@ -587,7 +587,7 @@ public enum StatusWidgetMetric: String, CaseIterable {
     }
 }
 
-public struct StatusWidgetBatteryReading {
+public struct StatusWidgetBatteryReading: Equatable {
     public let level: Double?
     public let label: CompactMenuBar.Reading
     public let showsIcon: Bool

@@ -117,16 +117,18 @@ class KitTests: XCTestCase {
     @MainActor
     func testStackedMenuBarKeepsItsWidthWhenValuesAndKeyboardChange() throws {
         let style = CombinedModulesWidget.diskRAMLabels
-        let rows = try XCTUnwrap(style.stackedReadings(diskFreeBytes: 143_000_000_000, memoryFreeBytes: 12 * gibibyte))
+        let rows = try XCTUnwrap(style.stackedReadings(diskFreeBytes: 1_430_000_000_000, memoryFreeBytes: 12 * gibibyte))
         let fewerDigits = try XCTUnwrap(style.stackedReadings(diskFreeBytes: 4_000_000_000, memoryFreeBytes: gibibyte))
         let thresholds = StatusWidgetMetric.battery.defaultThresholds
-        let widget = StackedMenuBarView()
+        let widget = CountingStackedMenuBarView()
         let full = StatusWidgetBatteryReading(level: 1, isDischarging: false, thresholds: thresholds, showsIcon: true)
-        widget.update([rows.disk, rows.memory], style: style, showsUnits: true, keyboard: "RU", battery: full)
+        widget.update([rows.disk, rows.memory], style: style, showsUnits: true, minimumDigits: 4, indicators: ("RU", full))
         let width = widget.frame.width
+        let resizeCount = widget.resizeCount
         let low = StatusWidgetBatteryReading(level: 0.09, isDischarging: true, thresholds: thresholds, showsIcon: true)
-        widget.update([fewerDigits.disk, fewerDigits.memory], style: style, showsUnits: true, keyboard: "EN", battery: low)
+        widget.update([fewerDigits.disk, fewerDigits.memory], style: style, showsUnits: true, minimumDigits: 4, indicators: ("EN", low))
         XCTAssertEqual(widget.frame.width, width)
+        XCTAssertEqual(widget.resizeCount, resizeCount)
 
         let canvas = NSImage(size: widget.frame.size)
         canvas.lockFocus()
@@ -134,11 +136,20 @@ class KitTests: XCTestCase {
         canvas.unlockFocus()
 
         let percentOnly = StatusWidgetBatteryReading(level: 1, isDischarging: false, thresholds: thresholds, showsIcon: false)
-        widget.update([rows.disk, rows.memory], style: style, showsUnits: true, keyboard: "RU", battery: percentOnly)
-        XCTAssertLessThan(widget.frame.width, width)
+        widget.update([rows.disk, rows.memory], style: style, showsUnits: true, minimumDigits: 4, indicators: ("RU", percentOnly))
+        XCTAssertGreaterThan(widget.frame.width, width)
 
-        widget.update([rows.disk, rows.memory], style: style, showsUnits: true, keyboard: nil, battery: nil)
+        widget.update([rows.disk, rows.memory], style: style, showsUnits: true, minimumDigits: 4, indicators: (nil, nil))
         XCTAssertLessThan(widget.frame.width, width)
+    }
+
+    private final class CountingStackedMenuBarView: StackedMenuBarView {
+        private(set) var resizeCount = 0
+
+        override func setFrameSize(_ newSize: NSSize) {
+            self.resizeCount += 1
+            super.setFrameSize(newSize)
+        }
     }
 
     func testKeyboardAndBatteryUseCurrentInputLanguageAndWholePercentage() {

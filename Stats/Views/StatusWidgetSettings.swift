@@ -28,7 +28,7 @@ final class StatusWidgetSettings: NSStackView, NSTextFieldDelegate {
             PreferencesRow("Format", component: format),
             PreferencesRow("Show GB", component: units),
             PreferencesRow("Current keyboard layout", component: self.switchView(action: #selector(changeKeyboard), state: StatusWidgetPreferences.showsKeyboard)),
-            PreferencesRow("Battery percentage", component: self.switchView(action: #selector(changeBattery), state: StatusWidgetPreferences.showsBattery)),
+            PreferencesRow("Show battery", component: self.switchView(action: #selector(changeBattery), state: StatusWidgetPreferences.showsBattery)),
             PreferencesRow("Battery icon", component: batteryIcon)
         ]))
         scroll.stackView.addArrangedSubview(self.thresholdSection("Disk (GB)", metric: .disk, warning: "Yellow below", critical: "Red below"))

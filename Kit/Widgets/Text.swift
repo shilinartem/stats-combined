@@ -35,7 +35,7 @@ public enum CompactMenuBar {
         }
     }
 
-    public struct Reading {
+    public struct Reading: Equatable {
         public let text: String
         public let tone: Tone
     }
