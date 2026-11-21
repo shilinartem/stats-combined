@@ -215,7 +215,8 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
             let charge = modules.lazy.compactMap { ($0 as? Battery)?.chargeStatus }.first
             battery = StatusWidgetBatteryReading(
                 level: charge?.level, isDischarging: charge?.isDischarging ?? false,
-                thresholds: StatusWidgetPreferences.thresholds(for: .battery), showsIcon: StatusWidgetPreferences.showsBatteryIcon
+                thresholds: StatusWidgetPreferences.thresholds(for: .battery), showsIcon: StatusWidgetPreferences.showsBatteryIcon,
+                isOnACPower: charge?.isOnACPower ?? false
             )
         }
         if self.stacked.superview !== self.view {
@@ -447,6 +448,7 @@ internal class StackedMenuBarView: NSView {
             self.draw(self.text(battery.label.text, color: color), in: rect, alignment: .center)
             return
         }
+        if battery.showsPowerPlug && self.drawPowerPlug(in: rect, color: color) { return }
 
         let left = (rect.midX - self.batteryIconWidth / 2).rounded()
         let y = (rect.midY - 4).rounded()
@@ -463,6 +465,19 @@ internal class StackedMenuBarView: NSView {
             fill.size.width *= CGFloat(level)
             NSBezierPath(roundedRect: fill, xRadius: min(1, fill.width / 2), yRadius: 1).fill()
         }
+    }
+
+    private func drawPowerPlug(in rect: NSRect, color: NSColor) -> Bool {
+        let configuration = NSImage.SymbolConfiguration(pointSize: 10, weight: .medium)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [color]))
+        guard let image = NSImage(systemSymbolName: "powerplug.fill", accessibilityDescription: nil)?.withSymbolConfiguration(configuration),
+              image.size.width > 0, image.size.height > 0 else { return false }
+        image.isTemplate = false
+        let scale = min(1, self.batteryIconWidth / image.size.width, rect.height / image.size.height)
+        let size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
+        let target = NSRect(x: (rect.midX - size.width / 2).rounded(), y: (rect.midY - size.height / 2).rounded(), width: size.width, height: size.height)
+        image.draw(in: target, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        return true
     }
 
     override func viewDidChangeEffectiveAppearance() {

@@ -104,6 +104,18 @@ class KitTests: XCTestCase {
         XCTAssertEqual(StatusWidgetBatteryReading(level: 0.15, isDischarging: false, thresholds: thresholds, showsIcon: true).label.tone, .normal)
     }
 
+    func testStatusWidgetShowsPowerPlugWhenConnectedAndIconModeIsEnabled() {
+        let thresholds = StatusWidgetMetric.battery.defaultThresholds
+        let connected = StatusWidgetBatteryReading(level: 1, isDischarging: false, thresholds: thresholds, showsIcon: true, isOnACPower: true)
+        let unplugged = StatusWidgetBatteryReading(level: 0.49, isDischarging: true, thresholds: thresholds, showsIcon: true, isOnACPower: false)
+        let percentage = StatusWidgetBatteryReading(level: 0.49, isDischarging: false, thresholds: thresholds, showsIcon: false, isOnACPower: true)
+        XCTAssertTrue(connected.showsPowerPlug)
+        XCTAssertEqual(connected.label.text, "100%")
+        XCTAssertFalse(unplugged.showsPowerPlug)
+        XCTAssertFalse(percentage.showsPowerPlug)
+        XCTAssertEqual(percentage.label.text, "49%")
+    }
+
     func testStackedMenuBarMovesBatteryIntoTheOptionalColumnOnly() {
         let style = CombinedModulesWidget.diskRAMUnits
         XCTAssertTrue(style.includes(module: .disk, showsBattery: false))
@@ -121,7 +133,7 @@ class KitTests: XCTestCase {
         let fewerDigits = try XCTUnwrap(style.stackedReadings(diskFreeBytes: 4_000_000_000, memoryFreeBytes: gibibyte))
         let thresholds = StatusWidgetMetric.battery.defaultThresholds
         let widget = CountingStackedMenuBarView()
-        let full = StatusWidgetBatteryReading(level: 1, isDischarging: false, thresholds: thresholds, showsIcon: true)
+        let full = StatusWidgetBatteryReading(level: 1, isDischarging: false, thresholds: thresholds, showsIcon: true, isOnACPower: true)
         widget.update([rows.disk, rows.memory], style: style, showsUnits: true, minimumDigits: 4, indicators: ("RU", full))
         let width = widget.frame.width
         let resizeCount = widget.resizeCount
@@ -132,6 +144,8 @@ class KitTests: XCTestCase {
 
         let canvas = NSImage(size: widget.frame.size)
         canvas.lockFocus()
+        widget.draw(widget.bounds)
+        widget.update([rows.disk, rows.memory], style: style, showsUnits: true, minimumDigits: 4, indicators: ("RU", full))
         widget.draw(widget.bounds)
         canvas.unlockFocus()
 

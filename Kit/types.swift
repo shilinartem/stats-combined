@@ -591,14 +591,16 @@ public struct StatusWidgetBatteryReading: Equatable {
     public let level: Double?
     public let label: CompactMenuBar.Reading
     public let showsIcon: Bool
+    public let showsPowerPlug: Bool
 
-    public init(level: Double?, isDischarging: Bool, thresholds: StatusWidgetThresholds, showsIcon: Bool) {
+    public init(level: Double?, isDischarging: Bool, thresholds: StatusWidgetThresholds, showsIcon: Bool, isOnACPower: Bool = false) {
         let level = level.flatMap { $0.isFinite ? min(1, max(0, $0)) : nil }
         let percentage = level.map { ($0 * 100).rounded() }
         let label = StatusWidgetMetric.battery.reading(percentage, thresholds: thresholds, suffix: "%")
         self.level = level
-        self.label = isDischarging ? label : CompactMenuBar.Reading(text: label.text, tone: .normal)
+        self.label = isDischarging && !isOnACPower ? label : CompactMenuBar.Reading(text: label.text, tone: .normal)
         self.showsIcon = showsIcon
+        self.showsPowerPlug = showsIcon && isOnACPower
     }
 }
 
